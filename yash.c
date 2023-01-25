@@ -150,7 +150,8 @@ void trim_processes() {
         }
       }
     }
-    if (cur != NULL) cur = cur->next_process;
+    if (cur != NULL)
+      cur = cur->next_process;
   }
 }
 
@@ -190,7 +191,9 @@ FUNCTION: Brings process to foreground (wait)
 INPUTS: N/A
 RETURN: N/A
 */
-void bring_to_front() { printf("front"); }
+void bring_to_front() {
+  printf("front");
+}
 
 /*
 FUNCTION: Prints the current stack of jobs in order with uniform format
@@ -230,7 +233,9 @@ FUNCTION: Kills process or process groups that are associated with a pid
 INPUTS: pid of process group to remove
 RETURN: N/A
 */
-void kill_proc(int pid) { kill(pid, SIGKILL); }
+void kill_proc(int pid) {
+  kill(pid, SIGKILL);
+}
 
 /*
 FUNCTION: Sets file redirections (stdin,stdout) across whole command string
@@ -338,8 +343,12 @@ INPUTS: parsed command lists of strings, numbers of args, original command
 string for printing purposes, background toggle for setting wait
 RETURN: N/A
 */
-void execute_pipe(char* cmd1[], int arg_count1, char* cmd2[], int arg_count2,
-                  char* args, int bg) {
+void execute_pipe(char* cmd1[],
+                  int arg_count1,
+                  char* cmd2[],
+                  int arg_count2,
+                  char* args,
+                  int bg) {
   int pfd[2];
   int cpid1, cpid2;
   pipe(pfd);
@@ -378,7 +387,8 @@ INPUTS: original command string
 RETURN: N/A
 */
 void process(char* cmd) {
-  if (cmd == NULL) return;
+  if (cmd == NULL)
+    return;
 
   char* orig = strdup(cmd);
 
@@ -389,7 +399,8 @@ void process(char* cmd) {
 
   // parses input command string to get args
   args[arg_count] = strtok(cmd, " ");
-  if (args[arg_count] == NULL) return;
+  if (args[arg_count] == NULL)
+    return;
   while (args[arg_count] != NULL) {
     // append next token to command array
     args[++arg_count] = strtok(NULL, " ");
@@ -490,7 +501,8 @@ int main() {
 
   while (1) {
     char* cmd = get_input();
-    if (!cmd) continue;
+    if (!cmd)
+      continue;
     process(cmd);
     trim_processes();
     monitor_jobs();
