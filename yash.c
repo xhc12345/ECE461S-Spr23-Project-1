@@ -53,12 +53,10 @@ struct process {
 struct process* head = NULL;
 struct process* top = NULL;
 
-/*
-FUNCTION: Gets input from command line
-
-INPUTS: N/A
-RETURN: command string and exit if EOF
-*/
+/**
+ * @brief Gets input from command line
+ * @return command string and exit if EOF
+ */
 char* get_input() {
   char* cmd = readline("# ");
   if (!cmd) {
@@ -67,13 +65,14 @@ char* get_input() {
   return cmd;
 }
 
-/*
-FUNCTION: Appends process to doubly-linked process stack
-
-INPUTS: Original command string, both pids of the running processes (pid2
-should be set to -1 if no pipe in process cmd), and a background identifier
-RETURN: N/A
-*/
+/**
+ * @brief Appends process to doubly-linked process stack
+ *
+ * @param args Original command string
+ * @param pid1 first PID
+ * @param pid2 second PID (set to -1 if no pipe in process cmd)
+ * @param background background identifier
+ */
 void add_process(char* args, int pid1, int pid2, int background) {
   struct process* proc = malloc(sizeof(struct process));
   proc->text = args;
@@ -104,12 +103,9 @@ void add_process(char* args, int pid1, int pid2, int background) {
   }
 }
 
-/*
-FUNCTION: Physically removes process that are done executing from the stack
-
-INPUTS: N/A
-RETURN: N/A
-*/
+/**
+ * @brief Physically removes process that are done executing from the stack
+ */
 void trim_processes() {
   struct process* cur = head;
   while (cur != NULL) {
@@ -155,12 +151,9 @@ void trim_processes() {
   }
 }
 
-/*
-FUNCTION: Sets the status of the done jobs so they can be removed
-
-INPUTS: N/A
-RETURN: N/A
-*/
+/**
+ * @brief Sets the status of the done jobs so they can be removed
+ */
 void monitor_jobs() {
   struct process* cur = head;
   while (cur != NULL) {
@@ -172,12 +165,9 @@ void monitor_jobs() {
   }
 }
 
-/*
-FUNCTION: Sends current stopped process to background
-
-INPUTS: N/A
-RETURN: N/A
-*/
+/**
+ * @brief Sends current stopped process to background
+ */
 void send_to_back() {
   if (head->state == 2) {
     kill(-1 * head->gpid, SIGCONT);
@@ -185,22 +175,16 @@ void send_to_back() {
   }
 }
 
-/*
-FUNCTION: Brings process to foreground (wait)
-
-INPUTS: N/A
-RETURN: N/A
-*/
+/**
+ * @brief Brings process to foreground (wait)
+ */
 void bring_to_front() {
   printf("front");
 }
 
-/*
-FUNCTION: Prints the current stack of jobs in order with uniform format
-
-INPUTS: N/A
-RETURN: N/A
-*/
+/**
+ * @brief Prints the current stack of jobs in order with uniform format
+ */
 void print_jobs() {
   struct process* cur = head;
   while (cur != NULL) {
@@ -227,22 +211,21 @@ void print_jobs() {
   }
 }
 
-/*
-FUNCTION: Kills process or process groups that are associated with a pid
-
-INPUTS: pid of process group to remove
-RETURN: N/A
-*/
+/**
+ * @brief Kills process or process groups that are associated with a pid
+ *
+ * @param pid PID of process group to remove
+ */
 void kill_proc(int pid) {
   kill(pid, SIGKILL);
 }
 
-/*
-FUNCTION: Sets file redirections (stdin,stdout) across whole command string
-
-INPUTS: parsed list of args, and the overall number of args (not including &)
-RETURN: N/A
-*/
+/**
+ * @brief Sets file redirections (stdin,stdout) across whole command string
+ *
+ * @param args parsed list of args
+ * @param arg_count overall number of args (not including &)
+ */
 void set_operators(char* args[], int arg_count) {
   int f_in = -1;
   int f_out = -1;
@@ -310,13 +293,14 @@ void set_operators(char* args[], int arg_count) {
   }
 }
 
-/*
-FUNCTION: Executes input command using execvp
-
-INPUTS: parsed command list of strings, number of args, original command
-string for printing purposes, background toggle for setting wait
-RETURN: N/A
-*/
+/**
+ * @brief Executes input command using execvp
+ *
+ * @param cmd parsed command list of strings
+ * @param arg_count number of args
+ * @param args original command string for printing purposes
+ * @param bg background toggle for setting wait
+ */
 void execute_cmd(char* cmd[], int arg_count, char* args, int bg) {
   int pid = fork();
   if (pid < 0) {
@@ -334,15 +318,17 @@ void execute_cmd(char* cmd[], int arg_count, char* args, int bg) {
   }
 }
 
-/*
-FUNCTION: Executes piped input command using execvp calls with this format:
-
-            cmd1 | cmd2
-
-INPUTS: parsed command lists of strings, numbers of args, original command
-string for printing purposes, background toggle for setting wait
-RETURN: N/A
-*/
+/**
+ * @brief Executes piped input command using execvp calls with this format:
+ *        cmd1 | cmd2
+ *
+ * @param cmd1 parsed command lists of strings
+ * @param arg_count1 numbers of args of cmd1
+ * @param cmd2 original command
+ * @param arg_count2 numbers of args of cmd2
+ * @param args string for printing purposes
+ * @param bg background toggle for setting wait
+ */
 void execute_pipe(char* cmd1[],
                   int arg_count1,
                   char* cmd2[],
@@ -379,13 +365,12 @@ void execute_pipe(char* cmd1[],
   }
 }
 
-/*
-FUNCTION: Processes and validates input, splits command into pipe if
-necessary, executes commands
-
-INPUTS: original command string
-RETURN: N/A
-*/
+/**
+ * @brief Processes and validates input, splits command into pipe if necessary,
+ * executes commands
+ *
+ * @param cmd original command string
+ */
 void process(char* cmd) {
   if (cmd == NULL)
     return;
@@ -460,12 +445,9 @@ void process(char* cmd) {
   }
 }
 
-/*
-FUNCTION: Handles interrupt command
-
-INPUTS: N/A
-RETURN: N/A
-*/
+/**
+ * @brief Handles interrupt command
+ */
 void sig_int() {
   kill(-1 * top->gpid, SIGKILL);
 
@@ -480,12 +462,9 @@ void sig_int() {
   }
 }
 
-/*
-FUNCTION: Handles halt command
-
-INPUTS: N/A
-RETURN: N/A
-*/
+/**
+ * @brief Handles halt command
+ */
 void sig_tstp() {
   head->state = 1;
   kill(-1 * head->gpid, SIGTSTP);
