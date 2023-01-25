@@ -1,7 +1,7 @@
 /**
  * EE461S - Project 1
  * Yash Shell
- * Max Dauber (mjd3375)
+ *
  */
 
 #include <ctype.h>
