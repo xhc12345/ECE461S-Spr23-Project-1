@@ -40,13 +40,14 @@
 
 // struct to represent and manage in stack jobs
 struct process {
-  int gpid;
-  int state;  // 0/running 1/stopped 2/done
+  pid_t pid;   // id
+  pid_t pgid;  // group id
+  int state;   // 0=running; 1=stopped; 2=done
   int job_num;
   char* text;
-  struct process* next_process;
-  struct process* prev_process;
-  int bg;  // 0/no 1/yes
+  struct process* nextProcess;
+  struct process* prevProcess;
+  int isBackground;  // boolean
 };
 
 // nodes represting base and top of job stack
@@ -77,10 +78,10 @@ void add_process(char* args, int pid1, int pid2, int background) {
   struct process* proc = malloc(sizeof(struct process));
   proc->text = args;
   proc->state = 0;
-  proc->bg = background;
+  proc->isBackground = background;
 
   // set process group as pid1 for both pids
-  proc->gpid = pid1;
+  proc->pgid = pid1;
   setpgid(pid1, 0);
   if (pid2 == -1) {
     setpgid(pid2, pid1);
@@ -89,15 +90,15 @@ void add_process(char* args, int pid1, int pid2, int background) {
   // if nothing on stack, add as head/top
   if (head == NULL) {
     proc->job_num = 1;
-    proc->next_process = NULL;
-    proc->prev_process = NULL;
+    proc->nextProcess = NULL;
+    proc->prevProcess = NULL;
     head = proc;
     top = proc;
   }
   // if something on stack append to top
   else {
-    proc->prev_process = top;
-    top->next_process = proc;
+    proc->prevProcess = top;
+    top->nextProcess = proc;
     proc->job_num = top->job_num + 1;
     top = proc;
   }
@@ -112,42 +113,42 @@ void trim_processes() {
     // if current process is done
     if (cur->state == 2) {
       // if only 1 element
-      if (cur->next_process == NULL) {
+      if (cur->nextProcess == NULL) {
         // print finished process if it was running in background
-        if (cur->bg == 1) {
+        if (cur->isBackground == 1) {
           printf(DONE_F, cur->job_num, CUR_M, DONE, cur->text);
         }
 
         // if only 1 element, set both pointers to null
-        if (cur->prev_process == NULL) {
+        if (cur->prevProcess == NULL) {
           head = NULL;
           top = NULL;
         }
         // if topmost node in stack, remove and reset top
         else {
-          top = cur->prev_process;
-          cur->prev_process->next_process = NULL;
+          top = cur->prevProcess;
+          cur->prevProcess->nextProcess = NULL;
         }
       }
 
       else {
         // print finised process if it was running in background
-        if (cur->bg == 1) {
+        if (cur->isBackground == 1) {
           printf(DONE_F, cur->job_num, BAK_M, DONE, cur->text);
         }
         // if bottom element is done, remove and set bottom to next up
-        if (cur->prev_process == NULL) {
-          head = cur->next_process;
+        if (cur->prevProcess == NULL) {
+          head = cur->nextProcess;
         }
         // remove node if in middle of stack
         else {
-          cur->prev_process->next_process = cur->next_process;
-          cur->next_process->prev_process = cur->prev_process;
+          cur->prevProcess->nextProcess = cur->nextProcess;
+          cur->nextProcess->prevProcess = cur->prevProcess;
         }
       }
     }
     if (cur != NULL)
-      cur = cur->next_process;
+      cur = cur->nextProcess;
   }
 }
 
@@ -157,11 +158,11 @@ void trim_processes() {
 void monitor_jobs() {
   struct process* cur = head;
   while (cur != NULL) {
-    if (waitpid(-1 * cur->gpid, NULL, WNOHANG | WUNTRACED) != 0 &&
+    if (waitpid(-1 * cur->pgid, NULL, WNOHANG | WUNTRACED) != 0 &&
         cur->state == 0) {
       cur->state = 2;
     }
-    cur = cur->next_process;
+    cur = cur->nextProcess;
   }
 }
 
@@ -170,7 +171,7 @@ void monitor_jobs() {
  */
 void send_to_back() {
   if (head->state == 2) {
-    kill(-1 * head->gpid, SIGCONT);
+    kill(-1 * head->pgid, SIGCONT);
     head->state = 0;
   }
 }
@@ -189,25 +190,25 @@ void print_jobs() {
   struct process* cur = head;
   while (cur != NULL) {
     if (cur->state == 2) {
-      if (cur->next_process == NULL) {
+      if (cur->nextProcess == NULL) {
         printf(DONE_F, cur->job_num, CUR_M, DONE, cur->text);
       } else {
         printf(DONE_F, cur->job_num, BAK_M, DONE, cur->text);
       }
     } else if (cur->state == 1) {
-      if (cur->next_process == NULL) {
+      if (cur->nextProcess == NULL) {
         printf(GEN_F, cur->job_num, CUR_M, STOPPED, cur->text);
       } else {
         printf(GEN_F, cur->job_num, BAK_M, STOPPED, cur->text);
       }
     } else {
-      if (cur->next_process == NULL) {
+      if (cur->nextProcess == NULL) {
         printf(GEN_F, cur->job_num, CUR_M, RUNNING, cur->text);
       } else {
         printf(GEN_F, cur->job_num, BAK_M, RUNNING, cur->text);
       }
     }
-    cur = cur->next_process;
+    cur = cur->nextProcess;
   }
 }
 
@@ -449,15 +450,15 @@ void process(char* cmd) {
  * @brief Handles interrupt command
  */
 void sig_int() {
-  kill(-1 * top->gpid, SIGKILL);
+  kill(-1 * top->pgid, SIGKILL);
 
   // removes current running process from stack
-  if (top->prev_process == NULL) {
+  if (top->prevProcess == NULL) {
     head = NULL;
     top = NULL;
   } else {
-    struct process* temp = top->prev_process;
-    temp->next_process = NULL;
+    struct process* temp = top->prevProcess;
+    temp->nextProcess = NULL;
     top = temp;
   }
 }
@@ -467,7 +468,7 @@ void sig_int() {
  */
 void sig_tstp() {
   head->state = 1;
-  kill(-1 * head->gpid, SIGTSTP);
+  kill(-1 * head->pgid, SIGTSTP);
 }
 
 int main() {
@@ -475,7 +476,7 @@ int main() {
   signal(SIGTTOU, SIG_IGN);
   signal(SIGINT, &sig_int);
   signal(SIGTSTP, &sig_tstp);
-  // signal(SIGCHLD,&sig_ch)
+
   tcsetpgrp(0, getpid());
 
   while (1) {
