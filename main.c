@@ -155,12 +155,23 @@ void set_operators(char* args[], int arg_count) {
  * @brief Executes input command using execvp
  *
  * @param cmd parsed command list of strings
- * @param arg_count number of args
+ * @param numArgs number of args
  * @param args original command string for printing purposes
  * @param bg background toggle for setting wait
  */
-void execute_cmd(char* cmd[], int arg_count, char* args, int bg) {
+void executeCommand(char* cmd[], int numArgs, char* args, int bg) {
   // TODO
+  int PID = fork();
+  if (PID == 0) {
+    // inside child process
+    execvp(cmd, numArgs);
+    printf("BAD COMMAND");  // child not supposed to get here
+  } else if (PID > 0) {
+    // inside parent process
+  } else {
+    // fork failed
+    printf("Fork failure, returned PID=%d\n", PID);
+  }
 }
 
 /**
@@ -221,7 +232,7 @@ void process(char* inputCmd) {
     // TODO: do command before and after pipe
   } else {
     // execute regular command
-    execute_cmd(args, numArgs, inputCmd, background);
+    executeCommand(args, numArgs, inputCmd, background);
   }
 }
 
