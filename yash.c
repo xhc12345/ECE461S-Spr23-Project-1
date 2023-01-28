@@ -55,18 +55,6 @@ struct process* head = NULL;
 struct process* top = NULL;
 
 /**
- * @brief Gets input from command line
- * @return command string and exit if EOF
- */
-char* get_input() {
-  char* cmd = readline("# ");
-  if (!cmd) {
-    _exit(0);
-  }
-  return cmd;
-}
-
-/**
  * @brief Appends process to doubly-linked process stack
  *
  * @param args Original command string
@@ -480,9 +468,9 @@ int main() {
   tcsetpgrp(0, getpid());
 
   while (1) {
-    char* cmd = get_input();
+    char* cmd = readline("# ");
     if (!cmd)
-      continue;
+      _exit(0);
     process(cmd);
     trim_processes();
     monitor_jobs();
