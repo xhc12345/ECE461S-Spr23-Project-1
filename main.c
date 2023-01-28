@@ -197,31 +197,31 @@ void process(char* inputCmd) {
   char* cmdCopy = strdup(inputCmd);
 
   char* args[MAX_ARGS];
-  int arg_count = 0;
-  int pipe_address = -1;
+  int pipeIndex = -1;
   int background = 0;
+  char* token;
 
+  int numArgs = 0;
   // parses input command string to get args
-  args[arg_count] = strtok_r(cmdCopy, " ", &cmdCopy);
-  if (args[arg_count] == NULL)
-    return;
-  while (args[arg_count] != NULL) {
-    // TODO: append next token to command array
-
-    // TODO: check if command has a pipe
+  while (token = strtok_r(cmdCopy, " ", &cmdCopy)) {
+    if (equal(token, PIPE)) {  // check if command has a pipe
+      pipeIndex = numArgs;
+    }
+    args[numArgs] = token;  // append token to command array
+    numArgs++;
   }
-  args[++arg_count] = NULL;
+  args[numArgs] = NULL;  // null terminate args
 
   // TODO: check if last character is & in order to send to background
 
   // TODO: check if input is built-in shell commands (BG, FG, JOBS, EXIT)
 
   // handles piping
-  if (pipe_address > 0) {
+  if (pipeIndex > 0) {
     // TODO: do command before and after pipe
   } else {
     // execute regular command
-    execute_cmd(args, arg_count, inputCmd, background);
+    execute_cmd(args, numArgs, inputCmd, background);
   }
 }
 
