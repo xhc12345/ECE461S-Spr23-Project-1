@@ -223,19 +223,48 @@ void executeCommand(char* cmdTokens[], int numToks, char* cmdInit, int bg) {
  *        cmd1 | cmd2
  *
  * @param cmd1 parsed command lists of strings
- * @param arg_count1 numbers of args of cmd1
+ * @param cmd1_len numbers of tokens of cmd1
  * @param cmd2 original command
- * @param arg_count2 numbers of args of cmd2
- * @param args string for printing purposes
+ * @param cmd2_len numbers of tokens of cmd2
+ * @param initInput string for printing purposes
  * @param bg background toggle for setting wait
  */
-void execute_pipe(char* cmd1[],
-                  int arg_count1,
-                  char* cmd2[],
-                  int arg_count2,
-                  char* args,
-                  int bg) {
+void executeTwoCommands(char* cmd1[],
+                        int cmd1_len,
+                        char* cmd2[],
+                        int cmd2_len,
+                        char* initInput,
+                        int bg) {
   // TODO
+  int pfd[2];  // pipe between the two commands. cmd1=>pfd[1], pfd[0]=>cmd2
+  pipe(pfd);
+  pid_t p1 = fork();
+  if (p1 > 0) {
+    // parent process
+
+  } else if (p1 == 0) {
+    // left cmd
+    dup2(pfd[1], STDOUT_FILENO);
+    close(pfd[0]);
+    // TODO: execvp
+    redirect(cmd1, cmd1_len);
+    execvp(cmd1[0], cmd1);
+  }
+  pid_t p2 = fork();
+  if (p2 == 0) {  // right cmd
+    dup2(pfd[0], STDIN_FILENO);
+    close(pfd[1]);
+    // TODO: execvp
+    redirect(cmd2, cmd2_len);
+    execvp(cmd2[0], cmd2);
+  }
+  if (p1 < 0 || p2 < 0) {
+    printf("Fork failure, returned pid1=%d, pid2=%d\n", p1, p2);
+  }
+  close(pfd[0]);
+  close(pfd[1]);
+  waitpid(p1, NULL, WNOHANG | WUNTRACED);  // wait for one of them to end
+  waitpid(p2, NULL, WNOHANG | WUNTRACED);  // and the other one
 }
 
 /**
@@ -259,10 +288,11 @@ void process(char* inputCmd) {
   int numArgs = 0;
   // parses input command string to get args
   while ((token = strtok_r(cmdCopy, " ", &cmdCopy))) {
+    args[numArgs] = token;     // append token to command array
     if (equal(token, PIPE)) {  // check if command has a pipe
-      pipeIndex = numArgs;
+      pipeIndex = numArgs;     // remembers the location of the pipe
+      args[pipeIndex] = NULL;  // null terminates cmd1
     }
-    args[numArgs] = token;  // append token to command array
     numArgs++;
   }
   args[numArgs] = NULL;  // null terminate args
@@ -273,7 +303,9 @@ void process(char* inputCmd) {
 
   // handles piping
   if (pipeIndex > 0) {
-    // TODO: do command before and after pipe
+    char** cmd1 = args;  // cmd1 starts the same as input but ends at pipeIndex
+    char** cmd2 = &args[pipeIndex + 1];  // cmd2 starts after pipeIndex
+    executeTwoCommands(cmd1, pipeIndex, cmd2, numArgs, inputCmd, background);
   } else {
     // execute regular command
     executeCommand(args, numArgs, inputCmd, background);
