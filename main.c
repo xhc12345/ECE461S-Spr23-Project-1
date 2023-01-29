@@ -157,8 +157,9 @@ void redirect(char* tokens[], int numToks) {
       tokens[i] = NULL;                // remove operator from tokens
       fd_in = open(nextToken, O_RDONLY);
       if (fd_in < 0) {
+        fprintf(stderr, "WHAT THE FUCK\n");
         perror("file doesn't exist");
-        return;
+        _exit(1);
       }
       dup2(fd_in, STDIN_FILENO);
       close(fd_in);
@@ -170,7 +171,7 @@ void redirect(char* tokens[], int numToks) {
       fd_out = open(nextToken, O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
       if (fd_out < 0) {
         perror("problem opening file");
-        return;
+        _exit(1);
       }
       dup2(fd_out, STDOUT_FILENO);
       close(fd_out);
@@ -180,8 +181,8 @@ void redirect(char* tokens[], int numToks) {
       tokens[i] = NULL;                 // remove operator from tokens
       fd_err = open(nextToken, O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
       if (fd_err < 0) {
-        perror("file doesn't exist");
-        return;
+        perror("problem with error file");
+        _exit(1);
       }
       dup2(fd_err, STDERR_FILENO);
       close(fd_err);
