@@ -1,2 +1,2 @@
-main: main.c
-	gcc -g -Wall -o main main.c -lreadline
+sash: sash.c
+	gcc -g -Wall -o sash sash.c -lreadline
