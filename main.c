@@ -36,7 +36,7 @@
 struct process {
   pid_t pid;   // id
   pid_t pgid;  // group id
-  int state;   // 0=running; 1=stopped; 2=done
+  int status;  // 0=running; 1=stopped; 2=done
   int job_num;
   char* text;
   struct process* nextProcess;
@@ -70,7 +70,7 @@ int equal(const char* s1, const char* s2) {
 void add_process(char* args, int pid1, int pid2, int background) {
   struct process* proc = malloc(sizeof(struct process));
   proc->text = args;
-  proc->state = 0;
+  proc->status = 0;
   proc->isBackground = background;
 
   // set process group as pid1 for both pids
@@ -154,20 +154,23 @@ void set_operators(char* args[], int arg_count) {
 /**
  * @brief Executes input command using execvp
  *
- * @param cmd parsed command list of strings
- * @param numArgs number of args
- * @param args original command string for printing purposes
+ * @param cmdTokens parsed command list of strings
+ * @param numToks number of items in cmdTokens
+ * @param cmdInit original command string for printing purposes
  * @param bg background toggle for setting wait
  */
-void executeCommand(char* cmd[], int numArgs, char* args, int bg) {
-  // TODO
-  int PID = fork();
+void executeCommand(char* cmdTokens[], int numToks, char* cmdInit, int bg) {
+  pid_t PID = fork();
   if (PID == 0) {
     // inside child process
-    execvp(cmd, numArgs);
-    printf("BAD COMMAND");  // child not supposed to get here
+    execvp(cmdTokens[0], cmdTokens);
+    fprintf(stderr, "BAD COMMAND\n");  // child not supposed to get here
+    _exit(1);
   } else if (PID > 0) {
-    // inside parent process
+    // TODO: inside parent process
+
+    wait(NULL);
+    printf("\nchild process finished\n");
   } else {
     // fork failed
     printf("Fork failure, returned PID=%d\n", PID);
@@ -214,7 +217,7 @@ void process(char* inputCmd) {
 
   int numArgs = 0;
   // parses input command string to get args
-  while (token = strtok_r(cmdCopy, " ", &cmdCopy)) {
+  while ((token = strtok_r(cmdCopy, " ", &cmdCopy))) {
     if (equal(token, PIPE)) {  // check if command has a pipe
       pipeIndex = numArgs;
     }
@@ -257,7 +260,7 @@ void sig_int() {
  * @brief Handles halt command
  */
 void sig_tstp() {
-  head->state = 1;
+  head->status = 1;
   kill(-1 * head->pgid, SIGTSTP);
 }
 
@@ -274,7 +277,7 @@ int main() {
     if (cmd == NULL)
       _exit(0);
     process(cmd);
-    trim_processes();
-    monitor_jobs();
+    // trim_processes();
+    // monitor_jobs();
   }
 }
