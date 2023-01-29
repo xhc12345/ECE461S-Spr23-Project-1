@@ -144,11 +144,50 @@ void kill_proc(int pid) {
 /**
  * @brief Sets file redirections (stdin,stdout) across whole command string
  *
- * @param args parsed list of args
- * @param arg_count overall number of args (not including &)
+ * @param tokens parsed list of args
+ * @param numToks overall number of args (not including &)
  */
-void set_operators(char* args[], int arg_count) {
-  // TODO
+void redirect(char* tokens[], int numToks) {
+  int fd_in, fd_out, fd_err;
+  // goes through each token to check for [<, >, 2>]
+  for (int i = 0; i < numToks - 1; i++) {
+    char* currToken = tokens[i];
+    char* nextToken = tokens[i + 1];
+    if (equal(currToken, REDIR_IN)) {  // "<" command
+      tokens[i] = NULL;                // remove operator from tokens
+      fd_in = open(nextToken, O_RDONLY);
+      if (fd_in < 0) {
+        perror("file doesn't exist");
+        return;
+      }
+      dup2(fd_in, STDIN_FILENO);
+      close(fd_in);
+      i++;  // next token is file, no need to check
+    }
+    if (equal(currToken, REDIR_OUT)) {  // ">" command
+      tokens[i] = NULL;                 // remove operator from tokens
+      // char* outputFile = strdup(nextToken);
+      fd_out = open(nextToken, O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
+      if (fd_out < 0) {
+        perror("problem opening file");
+        return;
+      }
+      dup2(fd_out, STDOUT_FILENO);
+      close(fd_out);
+      i++;  // next token is file, no need to check
+    }
+    if (equal(currToken, REDIR_ERR)) {  // "2>" command
+      tokens[i] = NULL;                 // remove operator from tokens
+      fd_err = open(nextToken, O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
+      if (fd_err < 0) {
+        perror("file doesn't exist");
+        return;
+      }
+      dup2(fd_err, STDERR_FILENO);
+      close(fd_err);
+      i++;  // next token is file, no need to check
+    }
+  }
 }
 
 /**
@@ -163,6 +202,7 @@ void executeCommand(char* cmdTokens[], int numToks, char* cmdInit, int bg) {
   pid_t PID = fork();
   if (PID == 0) {
     // inside child process
+    redirect(cmdTokens, numToks);
     execvp(cmdTokens[0], cmdTokens);
     fprintf(stderr, "BAD COMMAND\n");  // child not supposed to get here
     _exit(1);
