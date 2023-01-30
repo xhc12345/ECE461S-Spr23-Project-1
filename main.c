@@ -208,7 +208,7 @@ void executeCommand(char* cmdTokens[], int numToks, char* cmdInit, int bg) {
   } else if (PID > 0) {
     // TODO: inside parent process
 
-    wait(NULL);
+    waitpid(PID, NULL, WUNTRACED);
     printf("returned to main process\n");
   } else {
     // fork failed
@@ -266,10 +266,10 @@ void executeTwoCommands(char* cmd1[],
   }
   close(pfd[0]);
   close(pfd[1]);
-  // waitpid(p1, NULL, WNOHANG | WUNTRACED);  // wait for one of them to end
-  // waitpid(p2, NULL, WNOHANG | WUNTRACED);  // and the other one
-  wait(NULL);
-  wait(NULL);
+  waitpid(-1, NULL, /*WNOHANG | */ WUNTRACED);  // wait for one of them to end
+  waitpid(-1, NULL, /*WNOHANG | */ WUNTRACED);  // and the other one
+  // wait(NULL);
+  // wait(NULL);
   printf("returned to main process\n");
 }
 
@@ -320,32 +320,34 @@ void process(char* inputCmd) {
  * @brief Handles interrupt command
  */
 void sig_int() {
-  kill(-1 * top->pgid, SIGKILL);
+  // kill(-1 * top->pgid, SIGKILL);
 
-  // removes current running process from stack
-  if (top->prevProcess == NULL) {
-    head = NULL;
-    top = NULL;
-  } else {
-    struct process* temp = top->prevProcess;
-    temp->nextProcess = NULL;
-    top = temp;
-  }
+  // // removes current running process from stack
+  // if (top->prevProcess == NULL) {
+  //   head = NULL;
+  //   top = NULL;
+  // } else {
+  //   struct process* temp = top->prevProcess;
+  //   temp->nextProcess = NULL;
+  //   top = temp;
+  // }
+  printf("\npressed ctrl+c, interrupt\n");
 }
 
 /**
  * @brief Handles halt command
  */
 void sig_tstp() {
-  head->status = 1;
-  kill(-1 * head->pgid, SIGTSTP);
+  // head->status = 1;
+  // kill(-1 * head->pgid, SIGTSTP);
+  printf("\npressed ctrl+z, interactive stop\n");
 }
 
 int main() {
   // set signals to custom handlers
   signal(SIGTTOU, SIG_IGN);
-  signal(SIGINT, &sig_int);
-  signal(SIGTSTP, &sig_tstp);
+  signal(SIGINT, sig_int);
+  signal(SIGTSTP, sig_tstp);
 
   // give terminal control to yash by default
   tcsetpgrp(0, getpid());
