@@ -157,31 +157,28 @@ void redirect(char* tokens[], int numToks) {
       tokens[i] = NULL;                // remove operator from tokens
       fd_in = open(nextToken, O_RDONLY);
       if (fd_in < 0) {
-        fprintf(stderr, "WHAT THE FUCK\n");
-        perror("file doesn't exist");
+        perror(nextToken);
         _exit(1);
       }
       dup2(fd_in, STDIN_FILENO);
       close(fd_in);
       i++;  // next token is file, no need to check
-    }
-    if (equal(currToken, REDIR_OUT)) {  // ">" command
-      tokens[i] = NULL;                 // remove operator from tokens
+    } else if (equal(currToken, REDIR_OUT)) {  // ">" command
+      tokens[i] = NULL;                        // remove operator from tokens
       // char* outputFile = strdup(nextToken);
       fd_out = open(nextToken, O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
       if (fd_out < 0) {
-        perror("problem opening file");
+        perror(currToken);
         _exit(1);
       }
       dup2(fd_out, STDOUT_FILENO);
       close(fd_out);
       i++;  // next token is file, no need to check
-    }
-    if (equal(currToken, REDIR_ERR)) {  // "2>" command
-      tokens[i] = NULL;                 // remove operator from tokens
+    } else if (equal(currToken, REDIR_ERR)) {  // "2>" command
+      tokens[i] = NULL;                        // remove operator from tokens
       fd_err = open(nextToken, O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
       if (fd_err < 0) {
-        perror("problem with error file");
+        perror(currToken);
         _exit(1);
       }
       dup2(fd_err, STDERR_FILENO);
@@ -235,36 +232,40 @@ void executeTwoCommands(char* cmd1[],
                         int cmd2_len,
                         char* initInput,
                         int bg) {
-  // TODO
   int pfd[2];  // pipe between the two commands. cmd1=>pfd[1], pfd[0]=>cmd2
   pipe(pfd);
   pid_t p1 = fork();
   if (p1 > 0) {
-    // parent process
+    // TODO: parent process
 
   } else if (p1 == 0) {
     // left cmd
     dup2(pfd[1], STDOUT_FILENO);
     close(pfd[0]);
-    // TODO: execvp
     redirect(cmd1, cmd1_len);
     execvp(cmd1[0], cmd1);
+    fprintf(stderr, "BAD COMMAND on left side\n");
+    _exit(1);
   }
   pid_t p2 = fork();
-  if (p2 == 0) {  // right cmd
+  if (p2 == 0) {
+    // right cmd
     dup2(pfd[0], STDIN_FILENO);
     close(pfd[1]);
-    // TODO: execvp
     redirect(cmd2, cmd2_len);
     execvp(cmd2[0], cmd2);
+    fprintf(stderr, "BAD COMMAND on right side\n");
+    _exit(1);
   }
   if (p1 < 0 || p2 < 0) {
     printf("Fork failure, returned pid1=%d, pid2=%d\n", p1, p2);
   }
   close(pfd[0]);
   close(pfd[1]);
-  waitpid(p1, NULL, WNOHANG | WUNTRACED);  // wait for one of them to end
-  waitpid(p2, NULL, WNOHANG | WUNTRACED);  // and the other one
+  // waitpid(p1, NULL, WNOHANG | WUNTRACED);  // wait for one of them to end
+  // waitpid(p2, NULL, WNOHANG | WUNTRACED);  // and the other one
+  wait(NULL);
+  wait(NULL);
 }
 
 /**
@@ -274,9 +275,6 @@ void executeTwoCommands(char* cmd1[],
  * @param initCmd original command string
  */
 void process(char* inputCmd) {
-  if (inputCmd == NULL)
-    return;
-
   // a copy of input command to mess around with
   char* cmdCopy = strdup(inputCmd);
 
@@ -301,11 +299,12 @@ void process(char* inputCmd) {
 
   // TODO: check if input is built-in shell commands (BG, FG, JOBS, EXIT)
 
-  // handles piping
   if (pipeIndex > 0) {
+    // execute piped commmands
     char** cmd1 = args;  // cmd1 starts the same as input but ends at pipeIndex
     char** cmd2 = &args[pipeIndex + 1];  // cmd2 starts after pipeIndex
-    executeTwoCommands(cmd1, pipeIndex, cmd2, numArgs, inputCmd, background);
+    executeTwoCommands(cmd1, pipeIndex, cmd2, numArgs - pipeIndex - 1, inputCmd,
+                       background);
   } else {
     // execute regular command
     executeCommand(args, numArgs, inputCmd, background);
@@ -352,5 +351,6 @@ int main() {
     process(cmd);
     // trim_processes();
     // monitor_jobs();
+    free(cmd);
   }
 }
