@@ -33,8 +33,8 @@
 #define DONE_F "[%d]%s %s        %s\n"
 
 // struct to represent and manage in stack jobs
-struct process {
-  struct process* prevProcess;
+struct job {
+  struct job* prevJob;
   int jobID;
   int status;       // 0=running; 1=stopped; 2=done/completed
   char* jobString;  // original command
@@ -42,12 +42,12 @@ struct process {
   pid_t leftChildID;
   pid_t rightChildID;
   int isBackground;  // boolean
-  struct process* nextProcess;
+  struct job* nextJob;
 };
 
 // nodes represting base and top of job stack
-struct process* head = NULL;
-struct process* top = NULL;
+struct job* head = NULL;
+struct job* top = NULL;
 
 /**
  * @brief assess if the two string inputs are equal
@@ -68,35 +68,7 @@ int equal(const char* s1, const char* s2) {
  * @param pid2 second PID (set to -1 if no pipe in process cmd)
  * @param background background identifier
  */
-void add_process(char* args, int pid1, int pid2, int background) {
-  struct process* proc = malloc(sizeof(struct process));
-  proc->jobString = args;
-  proc->status = 0;
-  proc->isBackground = background;
-
-  // set process group as pid1 for both pids
-  proc->pgid = pid1;
-  setpgid(pid1, 0);
-  if (pid2 == -1) {
-    setpgid(pid2, pid1);
-  }
-
-  // if nothing on stack, add as head/top
-  if (head == NULL) {
-    proc->jobID = 1;
-    proc->nextProcess = NULL;
-    proc->prevProcess = NULL;
-    head = proc;
-    top = proc;
-  }
-  // if something on stack append to top
-  else {
-    proc->prevProcess = top;
-    top->nextProcess = proc;
-    proc->jobID = top->jobID + 1;
-    top = proc;
-  }
-}
+void add_process(char* args, int pid1, int pid2, int background) {}
 
 /**
  * @brief Physically removes process that are done executing from the stack
@@ -324,12 +296,12 @@ void sig_int() {
   // kill(-1 * top->pgid, SIGKILL);
 
   // // removes current running process from stack
-  // if (top->prevProcess == NULL) {
+  // if (top->prevJob == NULL) {
   //   head = NULL;
   //   top = NULL;
   // } else {
-  //   struct process* temp = top->prevProcess;
-  //   temp->nextProcess = NULL;
+  //   struct process* temp = top->prevJob;
+  //   temp->nextJob = NULL;
   //   top = temp;
   // }
   printf("\npressed ctrl+c, interrupt\n");
