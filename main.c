@@ -34,14 +34,15 @@
 
 // struct to represent and manage in stack jobs
 struct process {
-  pid_t pid;   // id
-  pid_t pgid;  // group id
-  int status;  // 0=running; 1=stopped; 2=done
-  int job_num;
-  char* text;
-  struct process* nextProcess;
   struct process* prevProcess;
+  int jobID;
+  int status;       // 0=running; 1=stopped; 2=done/completed
+  char* jobString;  // original command
+  pid_t pgid;       // group id
+  pid_t leftChildID;
+  pid_t rightChildID;
   int isBackground;  // boolean
+  struct process* nextProcess;
 };
 
 // nodes represting base and top of job stack
@@ -69,7 +70,7 @@ int equal(const char* s1, const char* s2) {
  */
 void add_process(char* args, int pid1, int pid2, int background) {
   struct process* proc = malloc(sizeof(struct process));
-  proc->text = args;
+  proc->jobString = args;
   proc->status = 0;
   proc->isBackground = background;
 
@@ -82,7 +83,7 @@ void add_process(char* args, int pid1, int pid2, int background) {
 
   // if nothing on stack, add as head/top
   if (head == NULL) {
-    proc->job_num = 1;
+    proc->jobID = 1;
     proc->nextProcess = NULL;
     proc->prevProcess = NULL;
     head = proc;
@@ -92,7 +93,7 @@ void add_process(char* args, int pid1, int pid2, int background) {
   else {
     proc->prevProcess = top;
     top->nextProcess = proc;
-    proc->job_num = top->job_num + 1;
+    proc->jobID = top->jobID + 1;
     top = proc;
   }
 }
