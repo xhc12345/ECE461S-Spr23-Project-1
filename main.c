@@ -200,6 +200,7 @@ void executeCommand(char* cmdTokens[], int numToks, char* cmdInit, int bg) {
   pid_t PID = fork();
   if (PID == 0) {
     // inside child process
+    setpgid(0, 0);
     redirect(cmdTokens, numToks);
     execvp(cmdTokens[0], cmdTokens);
     fprintf(stderr, "BAD COMMAND\n");  // child not supposed to get here
@@ -208,7 +209,7 @@ void executeCommand(char* cmdTokens[], int numToks, char* cmdInit, int bg) {
     // TODO: inside parent process
 
     wait(NULL);
-    printf("\nchild process finished\n");
+    printf("returned to main process\n");
   } else {
     // fork failed
     printf("Fork failure, returned PID=%d\n", PID);
@@ -240,6 +241,7 @@ void executeTwoCommands(char* cmd1[],
 
   } else if (p1 == 0) {
     // left cmd
+    setpgid(0, 0);  // create new process group led by left cmd
     dup2(pfd[1], STDOUT_FILENO);
     close(pfd[0]);
     redirect(cmd1, cmd1_len);
@@ -250,6 +252,7 @@ void executeTwoCommands(char* cmd1[],
   pid_t p2 = fork();
   if (p2 == 0) {
     // right cmd
+    setpgid(0, p1);  // join process group led by left cmd
     dup2(pfd[0], STDIN_FILENO);
     close(pfd[1]);
     redirect(cmd2, cmd2_len);
@@ -257,6 +260,7 @@ void executeTwoCommands(char* cmd1[],
     fprintf(stderr, "BAD COMMAND on right side\n");
     _exit(1);
   }
+
   if (p1 < 0 || p2 < 0) {
     printf("Fork failure, returned pid1=%d, pid2=%d\n", p1, p2);
   }
@@ -266,6 +270,7 @@ void executeTwoCommands(char* cmd1[],
   // waitpid(p2, NULL, WNOHANG | WUNTRACED);  // and the other one
   wait(NULL);
   wait(NULL);
+  printf("returned to main process\n");
 }
 
 /**
@@ -342,6 +347,7 @@ int main() {
   signal(SIGINT, &sig_int);
   signal(SIGTSTP, &sig_tstp);
 
+  // give terminal control to yash by default
   tcsetpgrp(0, getpid());
 
   while (1) {
