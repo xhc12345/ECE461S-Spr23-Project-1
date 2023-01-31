@@ -33,7 +33,7 @@
 // struct to represent and manage in stack jobs
 typedef struct Job {
   struct Job* prevJob;
-  int jobID;
+  int jobNum;
   int status;       // 0=running, 1=stopped, 2=done/completed
   char* jobString;  // original command
   pid_t pgid;       // group id
@@ -45,7 +45,7 @@ typedef struct Job {
 
 /**
  * @brief creates a new Job "object" like OOP language would. Callers need to
- * handle stack and jobID
+ * handle stack and jobNum
  *
  * @param pid1 first command
  * @param pid2 (if any) second command. (if none) put -1
@@ -67,7 +67,7 @@ Job* newJob(int pid1, int pid2, int isBackground, char* jobString) {
   job->status = RUNNING;
 
   // no association with stack for now. caller handles stack interaction
-  job->jobID = -1;
+  job->jobNum = -1;
   job->prevJob = NULL;
   job->nextJob = NULL;
 
@@ -109,7 +109,7 @@ void appendJobToStack(Job* job) {
     // if stack empty, set job as top and bottom since its the only one
     stack_base = job;
     stack_top = job;
-    job->jobID = 1;  // the first job
+    job->jobNum = 1;  // the first job
   } else {
     // if stack has jobs, set job as top and connect with previous top
     Job* prevJob = stack_top;
@@ -118,7 +118,7 @@ void appendJobToStack(Job* job) {
     prevJob->nextJob = job;
     job->prevJob = prevJob;
 
-    job->jobID = 1 + prevJob->jobID;
+    job->jobNum = 1 + prevJob->jobNum;
   }
 }
 /**
@@ -150,12 +150,17 @@ void removeJobFromStack(Job* currJob) {
 /**
  * @brief Physically removes process that are done executing from the stack
  */
-void trim_processes() {
-  // go thorough all processes on stack, check status of each one, remove done
+void updateJobStack() {
+  // go thorough all processes on stack, update status of each one, remove done
   Job* currJob = stack_base;
   while (currJob) {
+    // update stack
     switch (currJob->status) {
       case DONE:
+        if (currJob->isBackground) {
+          printf("Job: %d, Status: Done, CMD: %s", currJob->jobNum,
+                 currJob->jobString);
+        }
         // remove this job from stack and free it
         removeJobFromStack(currJob);
         Job* dyingJob = currJob;     // mark currJob as dead
@@ -167,14 +172,20 @@ void trim_processes() {
         currJob = currJob->nextJob;  // increment loop
         break;
     }
-  }
-}
 
-/**
- * @brief Sets the status of the done jobs so they can be removed
- */
-void monitor_jobs() {
-  // TODO
+    // update job status
+    int status;  // used for probing process status
+    int ret = waitpid(-1 * currJob->pgid, &status, WNOHANG | WUNTRACED);
+    if (ret != 0 && ret != -1) {
+      if (WIFEXITED(status)) {  // if job exited normally
+        currJob->status = DONE;
+      } else if (WIFSTOPPED(status)) {  // if job stopped by signal
+        currJob->status = STOPPED;
+      } else if (WIFCONTINUED(status)) {  // if job resumed by SIGCONT
+        currJob->status = RUNNING;
+      }
+    }
+  }
 }
 
 /**
@@ -198,7 +209,7 @@ void print_jobs() {
   // TODO
   int i = 1;
   for (Job* curr = stack_base; curr; curr = curr->nextJob, i++) {
-    printf("\tJob %d: %s\n", i, curr->jobString);
+    printf("\tJob %d: %s\n", curr->jobNum, curr->jobString);
   }
 }
 
@@ -350,6 +361,19 @@ void executeTwoCommands(char* cmd1[],
   printf("returned to main process\n");
 }
 
+void tokenize(char* cmd, char* tokenList[], int* numToks, int* pipeIndex) {
+  char* token;
+  while ((token = strtok_r(cmd, " ", &cmd))) {
+    tokenList[*numToks] = token;     // append token to command array
+    if (equal(token, PIPE)) {        // check if command has a pipe
+      *pipeIndex = *numToks;         // remembers the location of the pipe
+      tokenList[*pipeIndex] = NULL;  // null terminates cmd1
+    }
+    (*numToks)++;
+  }
+  tokenList[*numToks] = NULL;  // null terminate args
+}
+
 /**
  * @brief Processes and validates input, splits command into pipe if necessary,
  * executes commands
@@ -362,19 +386,10 @@ void process(char* inputCmd) {
   char* args[MAX_ARGS];
   int pipeIndex = -1;
   int isBackground = FALSE;  // 1/TRUE if cmd ends with '&'
-  char* token;
 
   int numArgs = 0;
   // parses input command string to get args
-  while ((token = strtok_r(cmdCopy, " ", &cmdCopy))) {
-    args[numArgs] = token;     // append token to command array
-    if (equal(token, PIPE)) {  // check if command has a pipe
-      pipeIndex = numArgs;     // remembers the location of the pipe
-      args[pipeIndex] = NULL;  // null terminates cmd1
-    }
-    numArgs++;
-  }
-  args[numArgs] = NULL;  // null terminate args
+  tokenize(cmdCopy, args, &numArgs, &pipeIndex);
   if (numArgs == 0)
     return;  // skip this command if its empty
 
@@ -433,8 +448,6 @@ int main() {
     if (strlen(cmd) <= 0)
       continue;
     process(cmd);
-    trim_processes();
-    print_jobs();
-    //  monitor_jobs();
+    updateJobStack();
   }
 }
