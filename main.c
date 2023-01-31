@@ -24,30 +24,60 @@
 #define BG "bg"
 #define FG "fg"
 #define EXIT "exit"
-#define RUNNING "Running"
-#define STOPPED "Stopped"
-#define DONE "Done"
+#define RUNNING 0
+#define STOPPED 1
+#define DONE 2
 #define CUR_M "+"
 #define BAK_M "-"
 #define GEN_F "[%d]%s %s     %s\n"
 #define DONE_F "[%d]%s %s        %s\n"
 
 // struct to represent and manage in stack jobs
-struct job {
-  struct job* prevJob;
+typedef struct Job {
+  Job* prevJob;
   int jobID;
-  int status;       // 0=running; 1=stopped; 2=done/completed
+  int status;       // 0=running, 1=stopped, 2=done/completed
   char* jobString;  // original command
   pid_t pgid;       // group id
   pid_t leftChildID;
   pid_t rightChildID;
-  int isBackground;  // boolean
-  struct job* nextJob;
-};
+  int isBackground;  // boolean. 1=yes, 2=no
+  Job* nextJob;
+} Job;
+/**
+ * @brief creates a new Job "object" like OOP language would. Callers need to
+ * handle stack and jobID
+ *
+ * @param pid1 first command
+ * @param pid2 (if any) second command. (if none) put -1
+ * @param isBackground boolean. 1=start from background, 0=otherwise
+ * @param jobString the original command string input
+ * @return Job* pointer to a malloc'd Job object
+ */
+Job* newJob(int pid1, int pid2, int isBackground, char* jobString) {
+  Job* job = malloc(sizeof(Job));
+
+  // fill up known inputs
+  job->pgid = pid1;
+  job->leftChildID = pid1;
+  job->rightChildID = pid2;
+  job->isBackground = isBackground;
+  job->jobString = jobString;
+
+  // job defaulted to running upon creation
+  job->status = RUNNING;
+
+  // no association with stack for now. caller handles stack interaction
+  job->jobID = -1;
+  job->prevJob = NULL;
+  job->nextJob = NULL;
+
+  return job;
+}
 
 // nodes represting base and top of job stack
-struct job* head = NULL;
-struct job* top = NULL;
+Job* stack_base = NULL;
+Job* stack_top = NULL;
 
 /**
  * @brief assess if the two string inputs are equal
@@ -63,12 +93,25 @@ int equal(const char* s1, const char* s2) {
 /**
  * @brief Appends process to doubly-linked process stack
  *
- * @param args Original command string
- * @param pid1 first PID
- * @param pid2 second PID (set to -1 if no pipe in process cmd)
- * @param background background identifier
+ * @param job the job to add onto program stack (on yash process)
  */
-void add_process(char* args, int pid1, int pid2, int background) {}
+void appendJobToStack(Job* job) {
+  if (stack_base == NULL) {
+    // if stack empty, set job as top and bottom since its the only one
+    stack_base = job;
+    stack_top = job;
+    job->jobID = 1;  // the first job
+  } else {
+    // if stack has jobs, set job as top and connect with previous top
+    Job* prevJob = stack_top;
+    stack_top = job;
+
+    prevJob->nextJob = job;
+    job->prevJob = prevJob;
+
+    job->jobID = 1 + prevJob->jobID;
+  }
+}
 
 /**
  * @brief Physically removes process that are done executing from the stack
@@ -169,7 +212,10 @@ void redirect(char* tokens[], int numToks) {
  * @param cmdInit original command string for printing purposes
  * @param bg background toggle for setting wait
  */
-void executeCommand(char* cmdTokens[], int numToks, char* cmdInit, int bg) {
+void executeCommand(char* cmdTokens[],
+                    int numToks,
+                    char* inputCmd,
+                    int isBackground) {
   pid_t PID = fork();
   if (PID == 0) {
     // inside child process
@@ -180,6 +226,9 @@ void executeCommand(char* cmdTokens[], int numToks, char* cmdInit, int bg) {
     _exit(1);
   } else if (PID > 0) {
     // TODO: inside parent process
+
+    Job* job = newJob(PID, -1, isBackground, inputCmd);  // job obj of this cmd
+    appendJobToStack(job);
 
     waitpid(PID, NULL, WUNTRACED);
     printf("returned to main process\n");
@@ -204,8 +253,8 @@ void executeTwoCommands(char* cmd1[],
                         int cmd1_len,
                         char* cmd2[],
                         int cmd2_len,
-                        char* initInput,
-                        int bg) {
+                        char* inputCmd,
+                        int isBackground) {
   int pfd[2];  // pipe between the two commands. cmd1=>pfd[1], pfd[0]=>cmd2
   pipe(pfd);
   pid_t p1 = fork();
@@ -253,12 +302,15 @@ void executeTwoCommands(char* cmd1[],
  * @param initCmd original command string
  */
 void process(char* inputCmd) {
+  if (inputCmd[0] == 0x00) {
+    return;  // skip this command if its empty
+  }
+
   // a copy of input command to mess around with
   char* cmdCopy = strdup(inputCmd);
-
   char* args[MAX_ARGS];
   int pipeIndex = -1;
-  int background = 0;
+  int isBackground = 0;  // 1 if cmd ends with '&'
   char* token;
 
   int numArgs = 0;
@@ -272,20 +324,30 @@ void process(char* inputCmd) {
     numArgs++;
   }
   args[numArgs] = NULL;  // null terminate args
-
-  // TODO: check if last character is & in order to send to background
+  if (numArgs == 0)
+    return;  // skip this command if its empty
 
   // TODO: check if input is built-in shell commands (BG, FG, JOBS, EXIT)
+
+  char* lastToken = args[numArgs - 1];
+  if (equal(lastToken, BACKGROUND)) {
+    printf("command started from background\n");
+    args[numArgs - 1] = NULL;  // nullify '&' to not mess up command
+    numArgs--;  // since '&' is gone, total numArgs needs to reflect that
+    // TODO: start job from background
+  }
 
   if (pipeIndex > 0) {
     // execute piped commmands
     char** cmd1 = args;  // cmd1 starts the same as input but ends at pipeIndex
     char** cmd2 = &args[pipeIndex + 1];  // cmd2 starts after pipeIndex
     executeTwoCommands(cmd1, pipeIndex, cmd2, numArgs - pipeIndex - 1, inputCmd,
-                       background);
-  } else {
+                       isBackground);
+  } else if (pipeIndex < 0) {
     // execute regular command
-    executeCommand(args, numArgs, inputCmd, background);
+    executeCommand(args, numArgs, inputCmd, isBackground);
+  } else {
+    fprintf(stderr, "syntax error near unexpected token '|'\n");
   }
 }
 
@@ -293,16 +355,16 @@ void process(char* inputCmd) {
  * @brief Handles interrupt command
  */
 void sig_int() {
-  // kill(-1 * top->pgid, SIGKILL);
+  // kill(-1 * stack_top->pgid, SIGKILL);
 
   // // removes current running process from stack
-  // if (top->prevJob == NULL) {
-  //   head = NULL;
-  //   top = NULL;
+  // if (stack_top->prevJob == NULL) {
+  //   stack_base = NULL;
+  //   stack_top = NULL;
   // } else {
-  //   struct process* temp = top->prevJob;
+  //   struct process* temp = stack_top->prevJob;
   //   temp->nextJob = NULL;
-  //   top = temp;
+  //   stack_top = temp;
   // }
   printf("\npressed ctrl+c, interrupt\n");
 }
@@ -311,8 +373,8 @@ void sig_int() {
  * @brief Handles halt command
  */
 void sig_tstp() {
-  // head->status = 1;
-  // kill(-1 * head->pgid, SIGTSTP);
+  // stack_base->status = 1;
+  // kill(-1 * stack_base->pgid, SIGTSTP);
   printf("\npressed ctrl+z, interactive stop\n");
 }
 
