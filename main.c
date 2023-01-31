@@ -74,6 +74,16 @@ Job* newJob(int pid1, int pid2, int isBackground, char* jobString) {
 
   return job;
 }
+/**
+ * @brief delete job obj similar to c++. frees the jobString (original cmd) too.
+ * Caller responsible for severing job's connetion in the stack.
+ *
+ * @param job the job obj to be freed
+ */
+void delJob(Job* job) {
+  free(job->jobString);
+  free(job);
+}
 
 // nodes represting base and top of job stack
 Job* stack_base = NULL;
@@ -91,7 +101,7 @@ int equal(const char* s1, const char* s2) {
 }
 
 /**
- * @brief Appends process to doubly-linked process stack
+ * @brief Appends job to doubly-linked job stack
  *
  * @param job the job to add onto program stack (on yash process)
  */
@@ -282,16 +292,17 @@ void executeTwoCommands(char* cmd1[],
     fprintf(stderr, "BAD COMMAND on right side\n");
     _exit(1);
   }
-
-  if (p1 < 0 || p2 < 0) {
-    printf("Fork failure, returned pid1=%d, pid2=%d\n", p1, p2);
-  }
   close(pfd[0]);
   close(pfd[1]);
+  if (p1 < 0 || p2 < 0) {
+    printf("Fork failure, returned pid1=%d, pid2=%d\n", p1, p2);
+    return;
+  }
+  Job* job = newJob(p1, p2, isBackground, inputCmd);  // job obj of this cmd
+  appendJobToStack(job);
+
   waitpid(-1, NULL, /*WNOHANG | */ WUNTRACED);  // wait for one of them to end
   waitpid(-1, NULL, /*WNOHANG | */ WUNTRACED);  // and the other one
-  // wait(NULL);
-  // wait(NULL);
   printf("returned to main process\n");
 }
 
@@ -302,10 +313,6 @@ void executeTwoCommands(char* cmd1[],
  * @param initCmd original command string
  */
 void process(char* inputCmd) {
-  if (inputCmd[0] == 0x00) {
-    return;  // skip this command if its empty
-  }
-
   // a copy of input command to mess around with
   char* cmdCopy = strdup(inputCmd);
   char* args[MAX_ARGS];
@@ -355,17 +362,6 @@ void process(char* inputCmd) {
  * @brief Handles interrupt command
  */
 void sig_int() {
-  // kill(-1 * stack_top->pgid, SIGKILL);
-
-  // // removes current running process from stack
-  // if (stack_top->prevJob == NULL) {
-  //   stack_base = NULL;
-  //   stack_top = NULL;
-  // } else {
-  //   struct process* temp = stack_top->prevJob;
-  //   temp->nextJob = NULL;
-  //   stack_top = temp;
-  // }
   printf("\npressed ctrl+c, interrupt\n");
 }
 
@@ -373,8 +369,6 @@ void sig_int() {
  * @brief Handles halt command
  */
 void sig_tstp() {
-  // stack_base->status = 1;
-  // kill(-1 * stack_base->pgid, SIGTSTP);
   printf("\npressed ctrl+z, interactive stop\n");
 }
 
@@ -391,9 +385,10 @@ int main() {
     char* cmd = readline("# ");
     if (cmd == NULL)
       _exit(0);
+    if (strlen(cmd) <= 0)
+      continue;
     process(cmd);
     // trim_processes();
     // monitor_jobs();
-    free(cmd);
   }
 }
