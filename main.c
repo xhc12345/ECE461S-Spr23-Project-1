@@ -22,10 +22,6 @@
 #define REDIR_IN "<"
 #define REDIR_OUT ">"
 #define REDIR_ERR "2>"
-#define JOBS "jobs"
-#define BG "bg"
-#define FG "fg"
-#define EXIT "exit"
 #define RUNNING 0
 #define STOPPED 1
 #define DONE 2
@@ -62,6 +58,11 @@ Job* newJob(int pid1, int pid2, int isBackground, char* jobString) {
   job->rightChildID = pid2;
   job->isBackground = isBackground;
   job->jobString = jobString;
+  if (isBackground) {
+    // null the space before '&' in jobString (assumed end with " &")
+    int cmd_len = strlen(jobString);
+    jobString[cmd_len - 2] = 0x00;
+  }
 
   // job defaulted to running upon creation
   job->status = RUNNING;
@@ -146,6 +147,20 @@ void removeJobFromStack(Job* currJob) {
     stack_base = next;
   }
 }
+/**
+ * @brief based on bg job stack, return the most recent running or stopped job
+ *
+ * @return Job* pointer to Job that can be brought to foreground via 'fg'
+ */
+Job* getNextJobInLine() {
+  Job* ret = NULL;
+  for (Job* curr = stack_top; curr; curr = curr->prevJob) {
+    if (curr->status == RUNNING || curr->status == STOPPED) {
+      return curr;
+    }
+  }
+  return ret;
+}
 
 /**
  * @brief Physically removes process that are done executing from the stack
@@ -155,36 +170,60 @@ void updateJobStack() {
   Job* currJob = stack_base;
   while (currJob) {
     // update stack
-    switch (currJob->status) {
-      case DONE:
-        if (currJob->isBackground) {
-          printf("Job: %d, Status: Done, CMD: %s", currJob->jobNum,
-                 currJob->jobString);
-        }
-        // remove this job from stack and free it
-        removeJobFromStack(currJob);
-        Job* dyingJob = currJob;     // mark currJob as dead
-        currJob = currJob->nextJob;  // increment loop
-        delJob(dyingJob);            // kill popped job
-        break;
-
-      default:
-        currJob = currJob->nextJob;  // increment loop
-        break;
-    }
-
-    // update job status
-    int status;  // used for probing process status
-    int ret = waitpid(-1 * currJob->pgid, &status, WNOHANG | WUNTRACED);
-    if (ret != 0 && ret != -1) {
-      if (WIFEXITED(status)) {  // if job exited normally
-        currJob->status = DONE;
-      } else if (WIFSTOPPED(status)) {  // if job stopped by signal
-        currJob->status = STOPPED;
-      } else if (WIFCONTINUED(status)) {  // if job resumed by SIGCONT
-        currJob->status = RUNNING;
+    if (currJob->status == DONE) {
+      if (currJob->isBackground) {
+        printf("Job: %d, Status: Done, CMD: %s", currJob->jobNum,
+               currJob->jobString);
       }
+      // remove this job from stack and free it
+      removeJobFromStack(currJob);
+      Job* dyingJob = currJob;     // mark currJob as dead
+      currJob = currJob->nextJob;  // increment loop
+      delJob(dyingJob);            // kill popped job
+      continue;                    // no need to check dead job
     }
+
+    // // update job status
+    // int status;  // used for probing process status
+    // int ret = waitpid(-1 * currJob->pgid, &status, WNOHANG | WUNTRACED);
+    // if (ret != 0 && ret != -1) {
+    //   if (WIFEXITED(status)) {  // if job exited normally
+    //     currJob->status = DONE;
+    //   } else if (WIFSTOPPED(status)) {  // if job stopped by signal
+    //     currJob->status = STOPPED;
+    //   } else if (WIFCONTINUED(status)) {  // if job resumed by SIGCONT
+    //     currJob->status = RUNNING;
+    //   }
+    // }
+    currJob = currJob->nextJob;  // increment loop
+  }
+}
+
+void updateJobStatus() {
+  Job* currJob = stack_base;
+  while (currJob) {
+    // update job status
+    // int status;  // used for probing process status
+    // int ret = waitpid(-1 * currJob->pgid, &status, WNOHANG | WUNTRACED);
+    // if (ret != 0 && ret != -1) {
+    //   if (WIFEXITED(status)) {  // if job exited normally
+    //     currJob->status = DONE;
+    //     printf("DONE! %s\n", currJob->jobString);
+    //   } else if (WIFSTOPPED(status)) {  // if job stopped by signal
+    //     currJob->status = STOPPED;
+    //     printf("STOPPED! %s\n", currJob->jobString);
+    //   } else if (WIFCONTINUED(status)) {  // if job resumed by SIGCONT
+    //     currJob->status = RUNNING;
+    //     printf("RUNNING! %s\n", currJob->jobString);
+    //   }
+    // }
+
+    if (waitpid(-1 * currJob->pgid, NULL, WNOHANG | WUNTRACED) != 0 &&
+        currJob->status == RUNNING) {
+      currJob->status = DONE;
+    }
+
+    currJob = currJob->nextJob;  // increment loop
   }
 }
 
@@ -207,9 +246,14 @@ void bring_to_front() {
  */
 void print_jobs() {
   // TODO
-  int i = 1;
-  for (Job* curr = stack_base; curr; curr = curr->nextJob, i++) {
-    printf("\tJob %d: %s\n", curr->jobNum, curr->jobString);
+  Job* fgCandidate = getNextJobInLine();
+  for (Job* curr = stack_base; curr; curr = curr->nextJob) {
+    char* status = (curr->status == RUNNING
+                        ? "Running"
+                        : (curr->status == STOPPED ? "Stopped" : "Done"));
+    printf("[%d] %c %s\t%s%s\n", curr->jobNum,
+           (curr == fgCandidate ? '+' : '-'), status, curr->jobString,
+           (curr->status == RUNNING ? " &" : ""));
   }
 }
 
@@ -293,9 +337,12 @@ void executeCommand(char* cmdTokens[],
     // TODO: inside parent process
 
     Job* job = newJob(PID, -1, isBackground, inputCmd);  // job obj of this cmd
-    appendJobToStack(job);
 
-    waitpid(PID, NULL, WUNTRACED);
+    if (!isBackground) {
+      waitpid(PID, NULL, WUNTRACED);
+    } else {
+      appendJobToStack(job);
+    }
     printf("returned to main process\n");
   } else {
     // fork failed
@@ -354,11 +401,39 @@ void executeTwoCommands(char* cmd1[],
     return;
   }
   Job* job = newJob(p1, p2, isBackground, inputCmd);  // job obj of this cmd
-  appendJobToStack(job);
-
-  waitpid(-1, NULL, /*WNOHANG | */ WUNTRACED);  // wait for one of them to end
-  waitpid(-1, NULL, /*WNOHANG | */ WUNTRACED);  // and the other one
+  if (!isBackground) {
+    waitpid(-1, NULL, /*WNOHANG | */ WUNTRACED);  // wait for one of them to end
+    waitpid(-1, NULL, /*WNOHANG | */ WUNTRACED);  // and the other one
+  } else {
+    appendJobToStack(job);
+  }
   printf("returned to main process\n");
+}
+
+/**
+ * @brief execute shell commands if present. OW return false
+ *
+ * @param tokens tokenized command input
+ * @return boolean TRUE if the first token is one of ['fg', 'bg', 'jobs']
+ */
+int shellExecute(char* tokens[]) {
+  if (!tokens || !tokens[0]) {
+    printf("No commands\n");
+    return FALSE;
+  }
+  if (equal(tokens[0], "fg")) {
+    printf("fg command operation\n");
+    return TRUE;
+  }
+  if (equal(tokens[0], "bg")) {
+    printf("bg command operation\n");
+    return TRUE;
+  }
+  if (equal(tokens[0], "jobs")) {
+    print_jobs();
+    return TRUE;
+  }
+  return FALSE;
 }
 
 void tokenize(char* cmd, char* tokenList[], int* numToks, int* pipeIndex) {
@@ -393,7 +468,8 @@ void process(char* inputCmd) {
   if (numArgs == 0)
     return;  // skip this command if its empty
 
-  // TODO: check if input is built-in shell commands (BG, FG, JOBS, EXIT)
+  if (shellExecute(args))
+    return;  // if shell commands finished, skip everything else
 
   char* lastToken = args[numArgs - 1];
   if (equal(lastToken, BACKGROUND)) {
@@ -449,5 +525,6 @@ int main() {
       continue;
     process(cmd);
     updateJobStack();
+    updateJobStatus();
   }
 }
