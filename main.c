@@ -15,6 +15,8 @@
 
 #define MAX_LEN 1028
 #define MAX_ARGS 127
+#define TRUE 1
+#define FALSE 0
 #define PIPE "|"
 #define BACKGROUND "&"
 #define REDIR_IN "<"
@@ -27,14 +29,10 @@
 #define RUNNING 0
 #define STOPPED 1
 #define DONE 2
-#define CUR_M "+"
-#define BAK_M "-"
-#define GEN_F "[%d]%s %s     %s\n"
-#define DONE_F "[%d]%s %s        %s\n"
 
 // struct to represent and manage in stack jobs
 typedef struct Job {
-  Job* prevJob;
+  struct Job* prevJob;
   int jobID;
   int status;       // 0=running, 1=stopped, 2=done/completed
   char* jobString;  // original command
@@ -42,8 +40,9 @@ typedef struct Job {
   pid_t leftChildID;
   pid_t rightChildID;
   int isBackground;  // boolean. 1=yes, 2=no
-  Job* nextJob;
+  struct Job* nextJob;
 } Job;
+
 /**
  * @brief creates a new Job "object" like OOP language would. Callers need to
  * handle stack and jobID
@@ -122,12 +121,53 @@ void appendJobToStack(Job* job) {
     job->jobID = 1 + prevJob->jobID;
   }
 }
+/**
+ * @brief cut ties of input job from the stack and heals the stack
+ *
+ * @param currJob the Job to be removed from the stack
+ */
+void removeJobFromStack(Job* currJob) {
+  Job* prev = currJob->prevJob;
+  Job* next = currJob->nextJob;
+
+  if (next) {
+    // when there are more behind this job, pass currJob's prev back
+    next->prevJob = currJob->prevJob;
+  } else {
+    // currJob is on the top of stack. set stack_top to prev (NULL or JOB*)
+    stack_top = prev;
+  }
+
+  if (prev) {
+    // when there are more preceed this job, pass currJob's next forward
+    prev->nextJob = currJob->nextJob;
+  } else {
+    // currJob is on the base of stack. set stack_base to next (NULL or JOB*)
+    stack_base = next;
+  }
+}
 
 /**
  * @brief Physically removes process that are done executing from the stack
  */
 void trim_processes() {
-  // TODO
+  // go thorough all processes on stack, check status of each one, remove done
+  Job* currJob = stack_base;
+  while (currJob) {
+    switch (currJob->status) {
+      case DONE:
+        // remove this job from stack and free it
+        removeJobFromStack(currJob);
+        Job* dyingJob = currJob;     // mark currJob as dead
+        currJob = currJob->nextJob;  // increment loop
+        delJob(dyingJob);            // kill popped job
+        break;
+
+      default:
+        currJob = currJob->nextJob;  // increment loop
+        break;
+    }
+  }
 }
 
 /**
@@ -156,6 +196,10 @@ void bring_to_front() {
  */
 void print_jobs() {
   // TODO
+  int i = 1;
+  for (Job* curr = stack_base; curr; curr = curr->nextJob, i++) {
+    printf("\tJob %d: %s\n", i, curr->jobString);
+  }
 }
 
 /**
@@ -317,7 +361,7 @@ void process(char* inputCmd) {
   char* cmdCopy = strdup(inputCmd);
   char* args[MAX_ARGS];
   int pipeIndex = -1;
-  int isBackground = 0;  // 1 if cmd ends with '&'
+  int isBackground = FALSE;  // 1/TRUE if cmd ends with '&'
   char* token;
 
   int numArgs = 0;
@@ -339,6 +383,7 @@ void process(char* inputCmd) {
   char* lastToken = args[numArgs - 1];
   if (equal(lastToken, BACKGROUND)) {
     printf("command started from background\n");
+    isBackground = TRUE;
     args[numArgs - 1] = NULL;  // nullify '&' to not mess up command
     numArgs--;  // since '&' is gone, total numArgs needs to reflect that
     // TODO: start job from background
@@ -381,14 +426,15 @@ int main() {
   // give terminal control to yash by default
   tcsetpgrp(0, getpid());
 
-  while (1) {
+  while (TRUE) {
     char* cmd = readline("# ");
     if (cmd == NULL)
       _exit(0);
     if (strlen(cmd) <= 0)
       continue;
     process(cmd);
-    // trim_processes();
-    // monitor_jobs();
+    trim_processes();
+    print_jobs();
+    //  monitor_jobs();
   }
 }
