@@ -163,17 +163,42 @@ Job* getNextJobInLine() {
 }
 
 /**
- * @brief Physically removes process that are done executing from the stack
+ * @brief print a single Job's summary
+ *
+ * @param curr Job*, the job to be printed
+ * @param fgCandidate Job*, if equal to curr then print '+', else print '-'
  */
-void updateJobStack() {
+void printJob(Job* curr, Job* fgCandidate) {
+  char* status = (curr->status == RUNNING
+                      ? "Running"
+                      : (curr->status == STOPPED ? "Stopped" : "Done"));
+  printf("[%d] %c %s\t%s%s\n", curr->jobNum, (curr == fgCandidate ? '+' : '-'),
+         status, curr->jobString, (curr->status == RUNNING ? " &" : ""));
+}
+
+/**
+ * @brief Prints the current stack of jobs in order, under uniform format
+ */
+void printJobs() {
+  Job* fgCandidate = getNextJobInLine();
+  for (Job* curr = stack_base; curr; curr = curr->nextJob) {
+    printJob(curr, fgCandidate);
+  }
+}
+
+/**
+ * @brief Physically removes process that are done executing from the stack
+ *
+ * @param skipMessage boolean, true to not display bg done jobs
+ */
+void updateJobStack(int skipMessage) {
   // go thorough all processes on stack, update status of each one, remove done
   Job* currJob = stack_base;
   while (currJob) {
     // update stack
     if (currJob->status == DONE) {
-      if (currJob->isBackground) {
-        printf("Job: %d, Status: Done, CMD: %s", currJob->jobNum,
-               currJob->jobString);
+      if (currJob->isBackground && !skipMessage) {
+        printJob(currJob, NULL);
       }
       // remove this job from stack and free it
       removeJobFromStack(currJob);
@@ -239,22 +264,6 @@ void send_to_back() {
  */
 void bring_to_front() {
   printf("front");
-}
-
-/**
- * @brief Prints the current stack of jobs in order with uniform format
- */
-void print_jobs() {
-  // TODO
-  Job* fgCandidate = getNextJobInLine();
-  for (Job* curr = stack_base; curr; curr = curr->nextJob) {
-    char* status = (curr->status == RUNNING
-                        ? "Running"
-                        : (curr->status == STOPPED ? "Stopped" : "Done"));
-    printf("[%d] %c %s\t%s%s\n", curr->jobNum,
-           (curr == fgCandidate ? '+' : '-'), status, curr->jobString,
-           (curr->status == RUNNING ? " &" : ""));
-  }
 }
 
 /**
@@ -430,7 +439,7 @@ int shellExecute(char* tokens[]) {
     return TRUE;
   }
   if (equal(tokens[0], "jobs")) {
-    print_jobs();
+    printJobs();
     return TRUE;
   }
   return FALSE;
@@ -524,7 +533,7 @@ int main() {
     if (strlen(cmd) <= 0)
       continue;
     process(cmd);
-    updateJobStack();
+    updateJobStack(equal(cmd, "jobs"));
     updateJobStatus();
   }
 }
