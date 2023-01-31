@@ -207,19 +207,6 @@ void updateJobStack(int skipMessage) {
       delJob(dyingJob);            // kill popped job
       continue;                    // no need to check dead job
     }
-
-    // // update job status
-    // int status;  // used for probing process status
-    // int ret = waitpid(-1 * currJob->pgid, &status, WNOHANG | WUNTRACED);
-    // if (ret != 0 && ret != -1) {
-    //   if (WIFEXITED(status)) {  // if job exited normally
-    //     currJob->status = DONE;
-    //   } else if (WIFSTOPPED(status)) {  // if job stopped by signal
-    //     currJob->status = STOPPED;
-    //   } else if (WIFCONTINUED(status)) {  // if job resumed by SIGCONT
-    //     currJob->status = RUNNING;
-    //   }
-    // }
     currJob = currJob->nextJob;  // increment loop
   }
 }
@@ -228,24 +215,22 @@ void updateJobStatus() {
   Job* currJob = stack_base;
   while (currJob) {
     // update job status
-    // int status;  // used for probing process status
-    // int ret = waitpid(-1 * currJob->pgid, &status, WNOHANG | WUNTRACED);
-    // if (ret != 0 && ret != -1) {
-    //   if (WIFEXITED(status)) {  // if job exited normally
-    //     currJob->status = DONE;
-    //     printf("DONE! %s\n", currJob->jobString);
-    //   } else if (WIFSTOPPED(status)) {  // if job stopped by signal
-    //     currJob->status = STOPPED;
-    //     printf("STOPPED! %s\n", currJob->jobString);
-    //   } else if (WIFCONTINUED(status)) {  // if job resumed by SIGCONT
-    //     currJob->status = RUNNING;
-    //     printf("RUNNING! %s\n", currJob->jobString);
-    //   }
-    // }
-
-    if (waitpid(-1 * currJob->pgid, NULL, WNOHANG | WUNTRACED) != 0 &&
-        currJob->status == RUNNING) {
-      currJob->status = DONE;
+    int status;  // used for probing process status
+    int ret = waitpid(-1 * currJob->pgid, &status, WNOHANG | WUNTRACED);
+    if (ret != 0 && ret != -1) {
+      // printf("\tChecking exit status... ");
+      if (WIFEXITED(status)) {  // if job exited normally
+        currJob->status = DONE;
+        printf("DONE! %s\n", currJob->jobString);
+      } else if (WIFSTOPPED(status)) {  // if job stopped by signal
+        currJob->status = STOPPED;
+        printf("STOPPED! %s\n", currJob->jobString);
+      } else if (WIFCONTINUED(status)) {  // if job resumed by SIGCONT
+        currJob->status = RUNNING;
+        printf("RUNNING! %s\n", currJob->jobString);
+      } else {
+        printf("\tNo change!\n");
+      }
     }
 
     currJob = currJob->nextJob;  // increment loop
@@ -533,7 +518,7 @@ int main() {
     if (strlen(cmd) <= 0)
       continue;
     process(cmd);
-    updateJobStack(equal(cmd, "jobs"));
     updateJobStatus();
+    updateJobStack(equal(cmd, "jobs"));
   }
 }
