@@ -58,7 +58,7 @@ Job* newJob(int pid1, int pid2, int isBackground, char* jobString) {
   job->rightChildID = pid2;
   job->isBackground = isBackground;
   job->jobString = jobString;
-  if (isBackground) {
+  if (jobString && isBackground) {
     // null the space before '&' in jobString (assumed end with " &")
     int cmd_len = strlen(jobString);
     jobString[cmd_len - 2] = 0x00;
@@ -88,6 +88,12 @@ void delJob(Job* job) {
 // nodes represting base and top of job stack
 Job* stack_base = NULL;
 Job* stack_top = NULL;
+
+// whichever job holds terminal control
+Job* foreground = NULL;
+
+// the yash process, the mother of all processes
+Job* yash = NULL;
 
 /**
  * @brief assess if the two string inputs are equal
@@ -153,13 +159,12 @@ void removeJobFromStack(Job* currJob) {
  * @return Job* pointer to Job that can be brought to foreground via 'fg'
  */
 Job* getNextJobInLine() {
-  Job* ret = NULL;
   for (Job* curr = stack_top; curr; curr = curr->prevJob) {
     if (curr->status == RUNNING || curr->status == STOPPED) {
       return curr;
     }
   }
-  return ret;
+  return NULL;
 }
 
 /**
@@ -238,26 +243,44 @@ void updateJobStatus() {
 }
 
 /**
- * @brief Sends current stopped process to background
+ * @brief resume latest stopped job to continue in background. assumes stopped
+ * job is already on the stack
  */
-void send_to_back() {
-  // TODO
+void bg() {
+  Job* curr = stack_top;
+  while (curr) {
+    if (curr->status == STOPPED) {
+      if (kill(-1 * curr->pgid, SIGCONT) < 0) {
+        perror("bg SIGCONT");  // sigcont error occurred
+      } else {
+        // when successfully resumed the stopped job
+        curr->status = RUNNING;
+        printJob(curr, curr);
+      }
+      return;
+    }
+    curr = curr->prevJob;
+  }
+  perror("bg no target found");
 }
 
 /**
- * @brief Brings process to foreground (wait)
+ * @brief bring latest job on stack to continue/resume in foreground
  */
-void bring_to_front() {
-  printf("front");
-}
-
-/**
- * @brief Kills process or process groups that are associated with a pid
- *
- * @param pid PID of process group to remove
- */
-void kill_proc(int pid) {
-  kill(pid, SIGKILL);
+void fg() {
+  Job* target = getNextJobInLine();
+  if (!target) {
+    perror("fg no target found");
+    return;
+  }
+  if (kill(-1 * target->pgid, SIGCONT) < 0) {
+    perror("fg SIGCONT");  // sigcont error occurred
+  } else {
+    target->status = RUNNING;
+    removeJobFromStack(target);
+    foreground = target;
+    printf("%s\n", foreground->jobString);
+  }
 }
 
 /**
@@ -333,11 +356,13 @@ void executeCommand(char* cmdTokens[],
     Job* job = newJob(PID, -1, isBackground, inputCmd);  // job obj of this cmd
 
     if (!isBackground) {
+      foreground = job;
       waitpid(PID, NULL, WUNTRACED);
+      foreground = yash;
     } else {
       appendJobToStack(job);
     }
-    printf("returned to main process\n");
+    // printf("returned to main process\n");
   } else {
     // fork failed
     printf("Fork failure, returned PID=%d\n", PID);
@@ -396,12 +421,14 @@ void executeTwoCommands(char* cmd1[],
   }
   Job* job = newJob(p1, p2, isBackground, inputCmd);  // job obj of this cmd
   if (!isBackground) {
+    foreground = job;
     waitpid(-1, NULL, /*WNOHANG | */ WUNTRACED);  // wait for one of them to end
     waitpid(-1, NULL, /*WNOHANG | */ WUNTRACED);  // and the other one
+    foreground = yash;
   } else {
     appendJobToStack(job);
   }
-  printf("returned to main process\n");
+  // printf("returned to main process\n");
 }
 
 /**
@@ -417,10 +444,12 @@ int shellExecute(char* tokens[]) {
   }
   if (equal(tokens[0], "fg")) {
     printf("fg command operation\n");
+    fg();
     return TRUE;
   }
   if (equal(tokens[0], "bg")) {
     printf("bg command operation\n");
+    bg();
     return TRUE;
   }
   if (equal(tokens[0], "jobs")) {
@@ -492,14 +521,43 @@ void process(char* inputCmd) {
  * @brief Handles interrupt command
  */
 void sig_int() {
-  printf("\npressed ctrl+c, interrupt\n");
+  if (foreground != yash) {
+    // only interrupt jobs that aren't yash
+    printf("\npressed ctrl+c, interrupt\n");
+    kill(-1 * foreground->pgid, SIGKILL);  // send kill to fg process group
+
+    // remove fg job. Since fg Job not on stack, no pop needed
+    Job* deadMf = foreground;
+    foreground = yash;  // give control back to yash
+    tcsetpgrp(0, yash->pgid);
+
+    delJob(deadMf);
+  } else {
+    // printf("\n yash must live on to see another command!\n");
+    printf("\n# ");
+  }
 }
 
 /**
  * @brief Handles halt command
  */
 void sig_tstp() {
-  printf("\npressed ctrl+z, interactive stop\n");
+  if (foreground != yash) {
+    // only pause jobs other than yash
+    printf("\npressed ctrl+z, interactive stop\n");
+    kill(-1 * foreground->pgid, SIGTSTP);  // send stop to fg process group
+
+    // place fg process back on top of bg stack
+    Job* retiredMf = foreground;
+    foreground = yash;  // give control back to yash
+    tcsetpgrp(0, yash->pgid);
+
+    retiredMf->status = STOPPED;
+    appendJobToStack(retiredMf);
+  } else {
+    // printf("\n yash must work hard to process another command!\n");
+    printf("\n# ");
+  }
 }
 
 int main() {
@@ -509,7 +567,10 @@ int main() {
   signal(SIGTSTP, sig_tstp);
 
   // give terminal control to yash by default
-  tcsetpgrp(0, getpid());
+  pid_t shell = getpid();
+  tcsetpgrp(0, shell);
+  yash = newJob(shell, -1, FALSE, NULL);
+  foreground = yash;
 
   while (TRUE) {
     char* cmd = readline("# ");
