@@ -1,2 +1,2 @@
-main: main.c
-	gcc -g -Wall -o main main.c -lreadline
+yash: yash.c
+	gcc -g -Wall -o yash yash.c -lreadline
