@@ -200,12 +200,14 @@ void updateJobStack(int skipMessage) {
   // go thorough all processes on stack, update status of each one, remove done
   Job* currJob = stack_base;
   while (currJob) {
-    // update stack
+    // fprintf(stderr, "\tchecking %s\n", currJob->jobString);
+    //  update stack
     if (currJob->status == DONE) {
-      if (currJob->isBackground && !skipMessage) {
+      if (!skipMessage) {
         printJob(currJob, NULL);
       }
       // remove this job from stack and free it
+      // fprintf(stderr, "\t!removing %s\n", currJob->jobString);
       removeJobFromStack(currJob);
       Job* dyingJob = currJob;     // mark currJob as dead
       currJob = currJob->nextJob;  // increment loop
@@ -453,6 +455,7 @@ int shellExecute(char* tokens[]) {
     return TRUE;
   }
   if (equal(tokens[0], "jobs")) {
+    updateJobStatus();
     printJobs();
     return TRUE;
   }
