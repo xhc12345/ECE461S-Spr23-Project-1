@@ -26,7 +26,7 @@
 #define STOPPED 1
 #define DONE 2
 
-// struct to represent and manage in stack jobs
+// Job object
 typedef struct Job {
   struct Job* prevJob;
   int jobNum;
@@ -53,9 +53,9 @@ Job* newJob(int pid1, int pid2, int isBackground, char* jobString) {
   Job* job = malloc(sizeof(Job));
 
   if (setpgid(pid1, 0) == -1) {
-    perror("FAILED TO CREATE NEW GROUP FOR THIS JOB\n");
+    // perror("FAILED TO CREATE NEW GROUP FOR THIS JOB\n");
   } else {
-    fprintf(stderr, "SUCCESSFULLY CREATE NEW JOB GROUP\n");
+    // fprintf(stderr, "SUCCESSFULLY CREATE NEW JOB GROUP\n");
   }
   if (pid2 != -1)
     setpgid(pid2, pid1);
@@ -92,9 +92,8 @@ void delJob(Job* job) {
   free(job);
 }
 
-// nodes represting base and top of job stack
-Job* stack_base = NULL;
-Job* stack_top = NULL;
+Job* stack_base = NULL;  // top of Jobs stack
+Job* stack_top = NULL;   // base of Jobs stack
 
 // the yash process, the mother of all processes
 pid_t yash = -1;
@@ -102,30 +101,26 @@ pid_t yash = -1;
 // whichever job holds terminal control
 Job* foreground = NULL;
 /**
- * @brief spin off target into its own process group from yash group
+ * @brief yash leaves target's job group and forfeits terminal rights
  *
- * @param target the Job to leave yash's group (give up terminal)
+ * @param target the Job to loose yash (give up terminal)
  */
 void giveUpTerminalRights(Job* target) {
-  target->pgid = target->leftChildID;
-  if (-1 == setpgid(target->leftChildID, 0)) {
-    fprintf(stderr, "failed to give target a new group\n");
+  if (-1 == setpgid(yash, 0)) {
+    // fprintf(stderr, "failed to spin off a new yash group\n");
   } else {
-    fprintf(stderr, "target gained new group\n");
+    // fprintf(stderr, "yash left the group\n");
   }
-  if (target->rightChildID != -1)
-    setpgid(target->rightChildID, target->pgid);
+  tcsetpgrp(0, getpgid(yash));
 }
 /**
- * @brief target job joins yash's group to get access to terminal
+ * @brief yash joins target job group to give access to terminal
  *
  * @param target the Job to join yash's group (access terminal)
  */
 void accessTerminalRights(Job* target) {
-  target->pgid = yash;
-  setpgid(target->leftChildID, yash);
-  if (target->rightChildID != -1)
-    setpgid(target->rightChildID, yash);
+  setpgid(yash, target->pgid);
+  tcsetpgrp(0, getpgid(yash));
 }
 
 /**
@@ -140,7 +135,7 @@ int equal(const char* s1, const char* s2) {
 }
 
 /**
- * @brief Appends job to doubly-linked job stack
+ * @brief append job to the top of doubly-linked job stack
  *
  * @param job the job to add onto program stack (on yash process)
  */
@@ -308,11 +303,12 @@ void fg() {
     perror("fg no target found");
     return;
   }
-  fprintf(stderr,
-          "fg target leader pid = %d\tsignal send to group = %d\treal pgid = "
-          "%d\tyash pgid = %d\n",
-          target->leftChildID, target->pgid, getpgid(target->leftChildID),
-          yash);
+  // fprintf(stderr,
+  //         "fg target leader pid = %d\tsignal send to group = %d\treal pgid =
+  //         "
+  //         "%d\tyash pgid = %d\n",
+  //         target->leftChildID, target->pgid, getpgid(target->leftChildID),
+  //         yash);
   if (kill(-1 * target->pgid, SIGCONT) < 0) {
     perror("fg SIGCONT");  // sigcont error occurred
   } else {
@@ -325,10 +321,10 @@ void fg() {
 }
 
 /**
- * @brief Sets file redirections (stdin,stdout) across whole command string
+ * @brief open files for the command
  *
- * @param tokens parsed list of args
- * @param numToks overall number of args (not including &)
+ * @param tokens parsed list of commands
+ * @param numToks number of command tokens (not including &)
  */
 void redirect(char* tokens[], int numToks) {
   int fd_in, fd_out, fd_err;
@@ -372,12 +368,12 @@ void redirect(char* tokens[], int numToks) {
 }
 
 /**
- * @brief Executes input command using execvp
+ * @brief execute 1 command via execvp
  *
- * @param cmdTokens parsed command list of strings
- * @param numToks number of items in cmdTokens
- * @param cmdInit original command string for printing purposes
- * @param bg background toggle for setting wait
+ * @param cmdTokens parsed command strings
+ * @param numToks number of command tokens
+ * @param inputCmd original input
+ * @param isBackground whether the commands ends with '&'
  */
 void executeCommand(char* cmdTokens[],
                     int numToks,
@@ -406,7 +402,7 @@ void executeCommand(char* cmdTokens[],
       giveUpTerminalRights(job);
       appendJobToStack(job);
     }
-    printf("returned to main process\n");
+    // printf("returned to main process\n");
   } else {
     // fork failed
     printf("Fork failure, returned PID=%d\n", PID);
@@ -417,12 +413,12 @@ void executeCommand(char* cmdTokens[],
  * @brief Executes piped input command using execvp calls with this format:
  *        cmd1 | cmd2
  *
- * @param cmd1 parsed command lists of strings
+ * @param cmd1 parsed left command strings
  * @param cmd1_len numbers of tokens of cmd1
- * @param cmd2 original command
+ * @param cmd2 parsed right command strings
  * @param cmd2_len numbers of tokens of cmd2
- * @param initInput string for printing purposes
- * @param bg background toggle for setting wait
+ * @param inputCmd original input
+ * @param isBackground whether the commands ends with '&'
  */
 void executeTwoCommands(char* cmd1[],
                         int cmd1_len,
@@ -475,7 +471,7 @@ void executeTwoCommands(char* cmd1[],
     giveUpTerminalRights(job);
     appendJobToStack(job);
   }
-  printf("returned to main process\n");
+  // printf("returned to main process\n");
 }
 
 /**
@@ -486,16 +482,16 @@ void executeTwoCommands(char* cmd1[],
  */
 int shellExecute(char* tokens[]) {
   if (!tokens || !tokens[0]) {
-    printf("No commands\n");
+    // printf("No commands\n");
     return FALSE;
   }
   if (equal(tokens[0], "fg")) {
-    printf("fg command operation\n");
+    // printf("fg command operation\n");
     fg();
     return TRUE;
   }
   if (equal(tokens[0], "bg")) {
-    printf("bg command operation\n");
+    // printf("bg command operation\n");
     bg();
     return TRUE;
   }
@@ -521,10 +517,9 @@ void tokenize(char* cmd, char* tokenList[], int* numToks, int* pipeIndex) {
 }
 
 /**
- * @brief Processes and validates input, splits command into pipe if necessary,
- * executes commands
+ * @brief process the input, tokenize it, and execute them
  *
- * @param initCmd original command string
+ * @param initCmd user input
  */
 void process(char* inputCmd) {
   // a copy of input command to mess around with
@@ -544,7 +539,7 @@ void process(char* inputCmd) {
 
   char* lastToken = args[numArgs - 1];
   if (equal(lastToken, BACKGROUND)) {
-    printf("command started from background\n");
+    // printf("command started from background\n");
     isBackground = TRUE;
     args[numArgs - 1] = NULL;  // nullify '&' to not mess up command
     numArgs--;  // since '&' is gone, total numArgs needs to reflect that
@@ -566,58 +561,57 @@ void process(char* inputCmd) {
 }
 
 /**
- * @brief Handles interrupt command
+ * @brief handles interrupt ^C
  */
 void sig_int() {
   if (foreground) {
     // only interrupt jobs that aren't yash
-    fprintf(stderr, "\npressed ctrl+c, interrupt\n");
+    // fprintf(stderr, "\npressed ctrl+c, interrupt\n");
 
     // remove fg job. Since fg Job not on stack, no pop needed
     Job* deadMf = foreground;
     foreground = NULL;  // give control back to yash
 
-    // spin off foreground job from the yash process group
+    // yash leaves
     giveUpTerminalRights(deadMf);
     kill(-1 * deadMf->pgid, SIGKILL);  // send kill to fg process group
     delJob(deadMf);
   } else {
-    printf("\n yash must live on to see another command!\n");
+    // printf("\n yash must live on to see another command!\n");
     printf("\n# ");
   }
 }
 
 /**
- * @brief Handles halt command
+ * @brief handles halt ^Z
  */
 void sig_tstp() {
   if (foreground) {
     // only pause jobs other than yash
-    printf("\npressed ctrl+z, interactive stop\n");
+    // printf("\npressed ctrl+z, interactive stop\n");
 
     // place fg process back on top of bg stack
     Job* retiredMf = foreground;
     foreground = NULL;  // give control back to yash
 
-    // spin off foreground job from the yash process group
-    fprintf(stderr, "\tstopping %d, moving it from group <record:%d, real:%d> ",
-            retiredMf->leftChildID, retiredMf->pgid,
-            getpgid(retiredMf->leftChildID));
+    // yash leaves
+    // fprintf(stderr,
+    //         "\tstopping %d, moving yash from group <record:%d, real:%d> ",
+    //         retiredMf->leftChildID, retiredMf->pgid, getpgid(yash));
     giveUpTerminalRights(retiredMf);
-    fprintf(stderr, "to group %d\n", getpgid(retiredMf->leftChildID));
+    // fprintf(stderr, "to group %d. Yash pid=%d\n", getpgid(yash), yash);
     kill(-1 * retiredMf->pgid, SIGTSTP);  // send stop to fg process group
 
     retiredMf->status = STOPPED;
     retiredMf->isBackground = TRUE;
     appendJobToStack(retiredMf);
   } else {
-    printf("\n yash must work hard to process another command!\n");
+    // printf("\n yash must work hard to process another command!\n");
     printf("\n# ");
   }
 }
 
 int main() {
-  // set signals to custom handlers
   signal(SIGTTOU, SIG_IGN);
   signal(SIGINT, sig_int);
   signal(SIGTSTP, sig_tstp);
