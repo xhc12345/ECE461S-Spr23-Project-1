@@ -52,6 +52,13 @@ typedef struct Job {
 Job* newJob(int pid1, int pid2, int isBackground, char* jobString) {
   Job* job = malloc(sizeof(Job));
 
+  if (setpgid(pid1, 0) == -1) {
+    perror("FAILED TO CREATE NEW GROUP FOR THIS JOB\n");
+  } else {
+    fprintf(stderr, "SUCCESSFULLY CREATE NEW JOB GROUP\n");
+  }
+  if (pid2 != -1)
+    setpgid(pid2, pid1);
   // fill up known inputs
   job->pgid = pid1;
   job->leftChildID = pid1;
@@ -89,11 +96,37 @@ void delJob(Job* job) {
 Job* stack_base = NULL;
 Job* stack_top = NULL;
 
+// the yash process, the mother of all processes
+pid_t yash = -1;
+
 // whichever job holds terminal control
 Job* foreground = NULL;
-
-// the yash process, the mother of all processes
-Job* yash = NULL;
+/**
+ * @brief spin off target into its own process group from yash group
+ *
+ * @param target the Job to leave yash's group (give up terminal)
+ */
+void giveUpTerminalRights(Job* target) {
+  target->pgid = target->leftChildID;
+  if (-1 == setpgid(target->leftChildID, 0)) {
+    fprintf(stderr, "failed to give target a new group\n");
+  } else {
+    fprintf(stderr, "target gained new group\n");
+  }
+  if (target->rightChildID != -1)
+    setpgid(target->rightChildID, target->pgid);
+}
+/**
+ * @brief target job joins yash's group to get access to terminal
+ *
+ * @param target the Job to join yash's group (access terminal)
+ */
+void accessTerminalRights(Job* target) {
+  target->pgid = yash;
+  setpgid(target->leftChildID, yash);
+  if (target->rightChildID != -1)
+    setpgid(target->rightChildID, yash);
+}
 
 /**
  * @brief assess if the two string inputs are equal
@@ -275,11 +308,17 @@ void fg() {
     perror("fg no target found");
     return;
   }
+  fprintf(stderr,
+          "fg target leader pid = %d\tsignal send to group = %d\treal pgid = "
+          "%d\tyash pgid = %d\n",
+          target->leftChildID, target->pgid, getpgid(target->leftChildID),
+          yash);
   if (kill(-1 * target->pgid, SIGCONT) < 0) {
     perror("fg SIGCONT");  // sigcont error occurred
   } else {
     target->status = RUNNING;
     removeJobFromStack(target);
+    accessTerminalRights(target);
     foreground = target;
     printf("%s\n", foreground->jobString);
   }
@@ -347,7 +386,7 @@ void executeCommand(char* cmdTokens[],
   pid_t PID = fork();
   if (PID == 0) {
     // inside child process
-    setpgid(0, 0);
+    // setpgid(0, 0);
     redirect(cmdTokens, numToks);
     execvp(cmdTokens[0], cmdTokens);
     fprintf(stderr, "BAD COMMAND\n");  // child not supposed to get here
@@ -358,13 +397,16 @@ void executeCommand(char* cmdTokens[],
     Job* job = newJob(PID, -1, isBackground, inputCmd);  // job obj of this cmd
 
     if (!isBackground) {
+      accessTerminalRights(job);
       foreground = job;
       waitpid(PID, NULL, WUNTRACED);
-      foreground = yash;
+      giveUpTerminalRights(job);
+      foreground = NULL;
     } else {
+      giveUpTerminalRights(job);
       appendJobToStack(job);
     }
-    // printf("returned to main process\n");
+    printf("returned to main process\n");
   } else {
     // fork failed
     printf("Fork failure, returned PID=%d\n", PID);
@@ -423,14 +465,17 @@ void executeTwoCommands(char* cmd1[],
   }
   Job* job = newJob(p1, p2, isBackground, inputCmd);  // job obj of this cmd
   if (!isBackground) {
+    accessTerminalRights(job);
     foreground = job;
-    waitpid(-1, NULL, /*WNOHANG | */ WUNTRACED);  // wait for one of them to end
-    waitpid(-1, NULL, /*WNOHANG | */ WUNTRACED);  // and the other one
-    foreground = yash;
+    waitpid(-1 * yash, NULL, WUNTRACED);  // wait for one of them to end
+    waitpid(-1 * yash, NULL, WUNTRACED);  // and the other one
+    giveUpTerminalRights(job);
+    foreground = NULL;
   } else {
+    giveUpTerminalRights(job);
     appendJobToStack(job);
   }
-  // printf("returned to main process\n");
+  printf("returned to main process\n");
 }
 
 /**
@@ -524,19 +569,20 @@ void process(char* inputCmd) {
  * @brief Handles interrupt command
  */
 void sig_int() {
-  if (foreground != yash) {
+  if (foreground) {
     // only interrupt jobs that aren't yash
-    printf("\npressed ctrl+c, interrupt\n");
-    kill(-1 * foreground->pgid, SIGKILL);  // send kill to fg process group
+    fprintf(stderr, "\npressed ctrl+c, interrupt\n");
 
     // remove fg job. Since fg Job not on stack, no pop needed
     Job* deadMf = foreground;
-    foreground = yash;  // give control back to yash
-    tcsetpgrp(0, yash->pgid);
+    foreground = NULL;  // give control back to yash
 
+    // spin off foreground job from the yash process group
+    giveUpTerminalRights(deadMf);
+    kill(-1 * deadMf->pgid, SIGKILL);  // send kill to fg process group
     delJob(deadMf);
   } else {
-    // printf("\n yash must live on to see another command!\n");
+    printf("\n yash must live on to see another command!\n");
     printf("\n# ");
   }
 }
@@ -545,20 +591,27 @@ void sig_int() {
  * @brief Handles halt command
  */
 void sig_tstp() {
-  if (foreground != yash) {
+  if (foreground) {
     // only pause jobs other than yash
     printf("\npressed ctrl+z, interactive stop\n");
-    kill(-1 * foreground->pgid, SIGTSTP);  // send stop to fg process group
 
     // place fg process back on top of bg stack
     Job* retiredMf = foreground;
-    foreground = yash;  // give control back to yash
-    tcsetpgrp(0, yash->pgid);
+    foreground = NULL;  // give control back to yash
+
+    // spin off foreground job from the yash process group
+    fprintf(stderr, "\tstopping %d, moving it from group <record:%d, real:%d> ",
+            retiredMf->leftChildID, retiredMf->pgid,
+            getpgid(retiredMf->leftChildID));
+    giveUpTerminalRights(retiredMf);
+    fprintf(stderr, "to group %d\n", getpgid(retiredMf->leftChildID));
+    kill(-1 * retiredMf->pgid, SIGTSTP);  // send stop to fg process group
 
     retiredMf->status = STOPPED;
+    retiredMf->isBackground = TRUE;
     appendJobToStack(retiredMf);
   } else {
-    // printf("\n yash must work hard to process another command!\n");
+    printf("\n yash must work hard to process another command!\n");
     printf("\n# ");
   }
 }
@@ -571,9 +624,11 @@ int main() {
 
   // give terminal control to yash by default
   pid_t shell = getpid();
+  setpgid(0, 0);
   tcsetpgrp(0, shell);
-  yash = newJob(shell, -1, FALSE, NULL);
-  foreground = yash;
+  yash = shell;
+  // yash = newJob(shell, -1, FALSE, NULL);
+  foreground = NULL;
 
   while (TRUE) {
     char* cmd = readline("# ");
