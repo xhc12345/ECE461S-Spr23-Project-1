@@ -5,5 +5,8 @@
             "binaryPath": "/home/hcxu/Documents/UT/ECE461S/Projects/Project1/ECE461S-Spr23-Project-1/main",
             "binaryArgs": []
         }
-    ]
+    ],
+    "files.associations": {
+        "history.h": "c"
+    }
 }
